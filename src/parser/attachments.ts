@@ -1,3 +1,4 @@
+import { Inflate } from 'pako';
 import type { AttachmentRef } from './types';
 
 /**
@@ -80,6 +81,7 @@ export function scanJpegs(body: Uint8Array, baseOffset: number): AttachmentRef[]
           contentType: 'image/jpeg',
           sourceOffset: baseOffset + i,
           length: end - i,
+          encoding: 'raw',
         });
         i = end;
         continue;
@@ -88,4 +90,95 @@ export function scanJpegs(body: Uint8Array, baseOffset: number): AttachmentRef[]
     i += 1;
   }
   return out;
+}
+
+const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+
+function startsWithPngSignature(buf: Uint8Array): boolean {
+  if (buf.length < PNG_SIGNATURE.length) return false;
+  for (let i = 0; i < PNG_SIGNATURE.length; i += 1) {
+    if (buf[i] !== PNG_SIGNATURE[i]) return false;
+  }
+  return true;
+}
+
+/**
+ * Try to inflate `buf` starting at byte 0 as a zlib-wrapped DEFLATE stream.
+ * On success returns both the inflated bytes and the number of input bytes
+ * actually consumed. Returns null if the stream is malformed or pako throws.
+ *
+ * Implementation detail: we skip the 2-byte zlib header and push the raw
+ * DEFLATE stream into pako with `raw: true`. This avoids pako's auto-concat
+ * behavior, which, in zlib-wrap mode, calls `inflateReset` on any trailing
+ * non-zero byte after Z_STREAM_END and attempts to decode it as another zlib
+ * stream — behavior that wrecks `total_in` when we're scanning inside a
+ * larger file where trailing bytes are expected. Caller already validated the
+ * 2-byte header via the CMF/FLG checksum rule. The trailing adler32 (4B) is
+ * not consumed by raw inflate, so we add it back to report the full length
+ * of the zlib stream in the source buffer.
+ */
+function tryInflate(buf: Uint8Array): { result: Uint8Array; consumed: number } | null {
+  // zlib stream minimum is 2 (header) + 2 (deflate empty block) + 4 (adler32).
+  if (buf.length < 8) return null;
+  try {
+    const inf = new Inflate({ raw: true });
+    inf.push(buf.subarray(2));
+    // `ended` and `strm` are runtime properties on pako's Inflate that the
+    // shipped .d.ts doesn't expose. Cast through once to reach both.
+    const internals = inf as unknown as { ended: boolean; strm: { total_in: number } };
+    if (inf.err || !internals.ended) return null;
+    const result = inf.result;
+    if (!(result instanceof Uint8Array)) return null;
+    const rawConsumed = internals.strm.total_in;
+    if (!Number.isFinite(rawConsumed) || rawConsumed <= 0) return null;
+    const consumed = 2 + rawConsumed + 4; // zlib header + deflate + adler32
+    if (consumed > buf.length) return null;
+    return { result, consumed };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Scan `body` for zlib-wrapped PNG payloads. A candidate starts at any byte
+ * where CMF=0x78 and (CMF*256+FLG) mod 31 === 0 (the zlib header checksum
+ * rule). Each candidate is test-inflated; only those whose inflated output
+ * begins with the PNG signature are recorded.
+ *
+ * The checksum prefilter drops the vast majority of random byte matches
+ * before the expensive inflate call, which is important on 65MB backups.
+ */
+export function scanPngZlib(body: Uint8Array, baseOffset: number): AttachmentRef[] {
+  const out: AttachmentRef[] = [];
+  let i = 0;
+  while (i < body.length - 1) {
+    if (body[i] === 0x78) {
+      const cmf = body[i]!;
+      const flg = body[i + 1]!;
+      if (((cmf << 8) | flg) % 31 === 0) {
+        const res = tryInflate(body.subarray(i));
+        if (res && startsWithPngSignature(res.result)) {
+          out.push({
+            kind: 'image/png',
+            contentType: 'image/png',
+            sourceOffset: baseOffset + i,
+            length: res.consumed,
+            encoding: 'zlib-png',
+            decompressedLength: res.result.length,
+          });
+          i += res.consumed;
+          continue;
+        }
+      }
+    }
+    i += 1;
+  }
+  return out;
+}
+
+/** Scan both JPEG and zlib-wrapped PNG attachments, ordered by offset. */
+export function scanAttachments(body: Uint8Array, baseOffset: number): AttachmentRef[] {
+  const all = [...scanJpegs(body, baseOffset), ...scanPngZlib(body, baseOffset)];
+  all.sort((a, b) => a.sourceOffset - b.sourceOffset);
+  return all;
 }

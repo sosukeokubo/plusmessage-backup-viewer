@@ -45,15 +45,22 @@ export interface Attachment {
 
 /**
  * Tokenised attachment reference — offset + length into the backup buffer,
- * not the bytes themselves. The UI resolves these lazily via the Worker's
- * slice API when a thumbnail scrolls into view.
+ * not the bytes themselves. The UI resolves these lazily via the Worker when
+ * a thumbnail scrolls into view.
+ *
+ * `encoding` tells the Worker how to materialise the bytes:
+ *   - 'raw'       — slice [sourceOffset, sourceOffset+length) as-is.
+ *   - 'zlib-png'  — slice, then pako.inflate to recover the PNG stream.
+ *
+ * `decompressedLength` is the size the UI should expect after decoding
+ * (equals `length` for raw attachments).
  */
 export interface AttachmentRef {
   kind: 'image/jpeg' | 'image/png' | 'unknown';
   contentType: string;
   sourceOffset: number;
   length: number;
-  /** Optional: uncompressed size (PNG zlib payloads populate this in Step 8). */
+  encoding: 'raw' | 'zlib-png';
   decompressedLength?: number;
 }
 

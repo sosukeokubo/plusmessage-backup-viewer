@@ -44,7 +44,7 @@ export function AttachmentImage({ client, attachment, onJumpToOffset }: Props) {
       }
       setState({ status: 'loading' });
       client
-        .getSlice(attachment.sourceOffset, attachment.length)
+        .resolveAttachment(attachment)
         .then((bytes) => {
           if (cancelled) return;
           // Worker-transferred bytes always have a plain ArrayBuffer backing,
@@ -76,7 +76,7 @@ export function AttachmentImage({ client, attachment, onJumpToOffset }: Props) {
       cancelled = true;
       observer.disconnect();
     };
-  }, [client, attachment.sourceOffset, attachment.length, attachment.contentType, state.status]);
+  }, [client, attachment, state.status]);
 
   const sizeKb = (attachment.length / 1024).toFixed(1);
   const offsetLabel = `0x${attachment.sourceOffset.toString(16)}`;

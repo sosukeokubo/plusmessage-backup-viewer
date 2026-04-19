@@ -1,11 +1,11 @@
-import type { BackupSummary, ParseProgress } from '../parser/types';
+import type { AttachmentRef, BackupSummary, ParseProgress } from '../parser/types';
 import type { MainToWorker, WorkerToMain } from './protocol';
 
 export interface ParseOptions {
   onProgress?: (p: ParseProgress) => void;
 }
 
-interface PendingSlice {
+interface PendingBytes {
   resolve: (bytes: Uint8Array) => void;
   reject: (err: Error) => void;
 }
@@ -18,7 +18,9 @@ interface PendingSlice {
 export class ParserClient {
   private readonly worker: Worker;
   private sliceSeq = 0;
-  private readonly pendingSlices = new Map<number, PendingSlice>();
+  private readonly pendingSlices = new Map<number, PendingBytes>();
+  private attachmentSeq = 0;
+  private readonly pendingAttachments = new Map<number, PendingBytes>();
   private parsePromise: {
     resolve: (s: BackupSummary) => void;
     reject: (err: Error) => void;
@@ -37,6 +39,8 @@ export class ParserClient {
       this.parsePromise = null;
       for (const pending of this.pendingSlices.values()) pending.reject(err);
       this.pendingSlices.clear();
+      for (const pending of this.pendingAttachments.values()) pending.reject(err);
+      this.pendingAttachments.clear();
     };
   }
 
@@ -66,6 +70,20 @@ export class ParserClient {
     });
   }
 
+  /**
+   * Request the decoded bytes for an attachment. For `encoding: 'raw'` this is
+   * just a slice of the owned buffer; for `'zlib-png'` the Worker inflates the
+   * zlib stream and returns the decoded PNG bytes.
+   */
+  resolveAttachment(ref: AttachmentRef): Promise<Uint8Array> {
+    return new Promise<Uint8Array>((resolve, reject) => {
+      const id = ++this.attachmentSeq;
+      this.pendingAttachments.set(id, { resolve, reject });
+      const msg: MainToWorker = { type: 'attachment', id, ref };
+      this.worker.postMessage(msg);
+    });
+  }
+
   terminate(): void {
     this.worker.terminate();
     const err = new Error('worker terminated');
@@ -73,6 +91,8 @@ export class ParserClient {
     this.parsePromise = null;
     for (const pending of this.pendingSlices.values()) pending.reject(err);
     this.pendingSlices.clear();
+    for (const pending of this.pendingAttachments.values()) pending.reject(err);
+    this.pendingAttachments.clear();
   }
 
   private handleMessage(msg: WorkerToMain): void {
@@ -100,6 +120,22 @@ export class ParserClient {
         const pending = this.pendingSlices.get(msg.id);
         if (pending) {
           this.pendingSlices.delete(msg.id);
+          pending.reject(new Error(msg.message));
+        }
+        break;
+      }
+      case 'attachment': {
+        const pending = this.pendingAttachments.get(msg.id);
+        if (pending) {
+          this.pendingAttachments.delete(msg.id);
+          pending.resolve(msg.bytes);
+        }
+        break;
+      }
+      case 'attachmentError': {
+        const pending = this.pendingAttachments.get(msg.id);
+        if (pending) {
+          this.pendingAttachments.delete(msg.id);
           pending.reject(new Error(msg.message));
         }
         break;

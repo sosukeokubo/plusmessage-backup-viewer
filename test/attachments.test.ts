@@ -1,5 +1,6 @@
+import { deflate } from 'pako';
 import { describe, expect, it } from 'vitest';
-import { findJpegEnd, scanJpegs } from '../src/parser';
+import { findJpegEnd, scanAttachments, scanJpegs, scanPngZlib } from '../src/parser';
 
 /**
  * Build a well-formed (walker-wise) JPEG stream. Pixel data is nonsense but
@@ -64,6 +65,7 @@ describe('scanJpegs', () => {
       contentType: 'image/jpeg',
       sourceOffset: 0x1000 + prefix.length,
       length: jpeg.length,
+      encoding: 'raw',
     });
   });
 
@@ -91,5 +93,98 @@ describe('scanJpegs', () => {
     // Truncated: starts like a JPEG but bails out midway.
     const body = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00]);
     expect(scanJpegs(body, 0)).toEqual([]);
+  });
+});
+
+const PNG_SIGNATURE = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+
+/** Build a minimum-valid PNG byte stream (signature + IHDR + IDAT + IEND). */
+function miniPng(): Uint8Array {
+  // The PNG's internal validity doesn't matter for scanPngZlib — it only
+  // checks the 8-byte signature. Pad with deterministic filler so deflate has
+  // real input to chew on and we get a nontrivial zlib stream.
+  const filler = new Uint8Array(64);
+  for (let i = 0; i < filler.length; i += 1) filler[i] = i & 0xff;
+  const out = new Uint8Array(PNG_SIGNATURE.length + filler.length);
+  out.set(PNG_SIGNATURE, 0);
+  out.set(filler, PNG_SIGNATURE.length);
+  return out;
+}
+
+describe('scanPngZlib', () => {
+  it('detects a zlib-wrapped PNG embedded in a larger buffer', () => {
+    const png = miniPng();
+    const zlib = deflate(png); // pako's zlib-wrapped deflate
+    const prefix = new Uint8Array([0x00, 0x11, 0x22]);
+    const body = new Uint8Array(prefix.length + zlib.length + 4);
+    body.set(prefix, 0);
+    body.set(zlib, prefix.length);
+    body.set([0xde, 0xad, 0xbe, 0xef], prefix.length + zlib.length);
+
+    const refs = scanPngZlib(body, 0x2000);
+    expect(refs).toHaveLength(1);
+    expect(refs[0]).toEqual({
+      kind: 'image/png',
+      contentType: 'image/png',
+      sourceOffset: 0x2000 + prefix.length,
+      length: zlib.length,
+      encoding: 'zlib-png',
+      decompressedLength: png.length,
+    });
+  });
+
+  it('skips candidate bytes whose CMF/FLG does not satisfy the zlib checksum rule', () => {
+    // 0x78 followed by a byte that fails (cmf*256 + flg) % 31 === 0.
+    // 0x78 * 256 + 0x00 = 30720, 30720 % 31 = 29 → not a zlib header.
+    const body = new Uint8Array([0x78, 0x00, 0x78, 0x01, 0x02, 0x78, 0xff]);
+    expect(scanPngZlib(body, 0)).toEqual([]);
+  });
+
+  it('rejects a valid zlib stream whose inflated payload is not a PNG', () => {
+    const notPng = new Uint8Array([0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09]);
+    const zlib = deflate(notPng);
+    expect(scanPngZlib(zlib, 0)).toEqual([]);
+  });
+
+  it('finds multiple back-to-back zlib-PNG streams', () => {
+    const a = deflate(miniPng());
+    const b = deflate(miniPng());
+    const body = new Uint8Array(a.length + b.length);
+    body.set(a, 0);
+    body.set(b, a.length);
+
+    const refs = scanPngZlib(body, 0);
+    expect(refs).toHaveLength(2);
+    expect(refs[0]?.sourceOffset).toBe(0);
+    expect(refs[0]?.length).toBe(a.length);
+    expect(refs[1]?.sourceOffset).toBe(a.length);
+    expect(refs[1]?.length).toBe(b.length);
+  });
+});
+
+describe('scanAttachments', () => {
+  it('merges JPEG and PNG-zlib hits in offset order', () => {
+    const jpeg = miniJpeg();
+    const zlib = deflate(miniPng());
+    // Layout: [pad] [jpeg] [pad] [zlib] [pad]
+    const pad = new Uint8Array([0x00, 0x00]);
+    const body = new Uint8Array(pad.length + jpeg.length + pad.length + zlib.length + pad.length);
+    let off = 0;
+    body.set(pad, off);
+    off += pad.length;
+    const jpegOff = off;
+    body.set(jpeg, off);
+    off += jpeg.length;
+    body.set(pad, off);
+    off += pad.length;
+    const zlibOff = off;
+    body.set(zlib, off);
+
+    const refs = scanAttachments(body, 0);
+    expect(refs).toHaveLength(2);
+    expect(refs[0]?.kind).toBe('image/jpeg');
+    expect(refs[0]?.sourceOffset).toBe(jpegOff);
+    expect(refs[1]?.kind).toBe('image/png');
+    expect(refs[1]?.sourceOffset).toBe(zlibOff);
   });
 });

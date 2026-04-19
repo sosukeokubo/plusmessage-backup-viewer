@@ -18,7 +18,7 @@ import {
   TLV_HEADER_SIZE,
 } from './constants';
 import { iterateTlvs, readTlv } from './tlv';
-import { scanJpegs } from './attachments';
+import { scanAttachments } from './attachments';
 import type {
   Backup,
   BackupSummary,
@@ -240,7 +240,7 @@ function parseThread(rec: TlvRecord): Thread {
     raw: toRawChunk(rec),
     body,
     strings: extractPrintableStrings(body, bodyAbsoluteOffset),
-    attachments: scanJpegs(body, bodyAbsoluteOffset),
+    attachments: scanAttachments(body, bodyAbsoluteOffset),
     headerFlag: flag,
     headerSizeField: sizeField,
   };

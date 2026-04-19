@@ -1,5 +1,7 @@
 /// <reference lib="webworker" />
+import { inflate } from 'pako';
 import { parseBackup, summarizeBackup } from '../parser';
+import type { AttachmentRef } from '../parser/types';
 import type { MainToWorker, WorkerToMain } from './protocol';
 
 const ctx = self as unknown as DedicatedWorkerGlobalScope;
@@ -35,24 +37,46 @@ function handleParse(buffer: ArrayBuffer) {
   }
 }
 
-function handleSlice(id: number, offset: number, length: number) {
-  if (!owned) {
-    post({ type: 'sliceError', id, message: 'no buffer loaded' });
-    return;
-  }
+function sliceOwned(offset: number, length: number): Uint8Array | { error: string } {
+  if (!owned) return { error: 'no buffer loaded' };
   if (offset < 0 || length < 0 || offset + length > owned.length) {
-    post({
-      type: 'sliceError',
-      id,
-      message: `slice out of range: [${offset}, ${offset + length}) of ${owned.length}`,
-    });
-    return;
+    return { error: `slice out of range: [${offset}, ${offset + length}) of ${owned.length}` };
   }
-  // Copy into an owned ArrayBuffer so it can be transferred without
-  // detaching the main buffer.
   const copy = new Uint8Array(length);
   copy.set(owned.subarray(offset, offset + length));
-  post({ type: 'slice', id, bytes: copy }, [copy.buffer]);
+  return copy;
+}
+
+function handleSlice(id: number, offset: number, length: number) {
+  const res = sliceOwned(offset, length);
+  if (res instanceof Uint8Array) {
+    post({ type: 'slice', id, bytes: res }, [res.buffer]);
+  } else {
+    post({ type: 'sliceError', id, message: res.error });
+  }
+}
+
+function handleAttachment(id: number, ref: AttachmentRef) {
+  const sliced = sliceOwned(ref.sourceOffset, ref.length);
+  if (!(sliced instanceof Uint8Array)) {
+    post({ type: 'attachmentError', id, message: sliced.error });
+    return;
+  }
+  if (ref.encoding === 'raw') {
+    post({ type: 'attachment', id, bytes: sliced }, [sliced.buffer]);
+    return;
+  }
+  // 'zlib-png' — inflate the slice and ship the decoded PNG bytes.
+  try {
+    const decoded = inflate(sliced);
+    post({ type: 'attachment', id, bytes: decoded }, [decoded.buffer]);
+  } catch (err) {
+    post({
+      type: 'attachmentError',
+      id,
+      message: `inflate failed: ${err instanceof Error ? err.message : String(err)}`,
+    });
+  }
 }
 
 ctx.onmessage = (e: MessageEvent<MainToWorker>) => {
@@ -63,6 +87,9 @@ ctx.onmessage = (e: MessageEvent<MainToWorker>) => {
       break;
     case 'slice':
       handleSlice(data.id, data.offset, data.length);
+      break;
+    case 'attachment':
+      handleAttachment(data.id, data.ref);
       break;
   }
 };
