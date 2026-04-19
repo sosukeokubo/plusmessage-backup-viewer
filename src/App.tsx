@@ -7,6 +7,7 @@ import { HexDump } from './debug/HexDump';
 import { TlvTree } from './debug/TlvTree';
 import type { BackupSummary, ParseProgress } from './parser/types';
 import { ParserClient } from './worker/parserClient';
+import { clearBlobCache } from './util/blobCache';
 
 export function App() {
   const [bytes, setBytes] = useState<Uint8Array | null>(null);
@@ -17,12 +18,14 @@ export function App() {
   const [jumpOffset, setJumpOffset] = useState<number | undefined>(undefined);
   const [showDebug, setShowDebug] = useState(false);
   const [selectedThreadId, setSelectedThreadId] = useState<string | undefined>(undefined);
+  const [client, setClient] = useState<ParserClient | null>(null);
   const clientRef = useRef<ParserClient | null>(null);
 
   useEffect(() => {
     return () => {
       clientRef.current?.terminate();
       clientRef.current = null;
+      clearBlobCache();
     };
   }, []);
 
@@ -39,9 +42,11 @@ export function App() {
     setJumpOffset(undefined);
 
     clientRef.current?.terminate();
-    const client = new ParserClient();
-    clientRef.current = client;
-    client
+    clearBlobCache();
+    const next = new ParserClient();
+    clientRef.current = next;
+    setClient(next);
+    next
       .parse(buffer, { onProgress: setProgress })
       .then((s) => {
         setSummary(s);
@@ -54,6 +59,8 @@ export function App() {
   const handleReset = useCallback(() => {
     clientRef.current?.terminate();
     clientRef.current = null;
+    setClient(null);
+    clearBlobCache();
     setBytes(null);
     setFileName(null);
     setSummary(null);
@@ -151,6 +158,7 @@ export function App() {
                   />
                   <ThreadDetail
                     thread={selectedThread}
+                    client={client}
                     onJumpToOffset={(off) => {
                       setJumpOffset(off);
                       setShowDebug(true);

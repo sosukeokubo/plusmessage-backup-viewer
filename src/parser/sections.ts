@@ -18,6 +18,7 @@ import {
   TLV_HEADER_SIZE,
 } from './constants';
 import { iterateTlvs, readTlv } from './tlv';
+import { scanJpegs } from './attachments';
 import type {
   Backup,
   BackupSummary,
@@ -227,6 +228,7 @@ function parseThread(rec: TlvRecord): Thread {
   }
   const sizeField = r.readU32LE();
   const body = r.readBytes(r.remaining);
+  const bodyAbsoluteOffset = rec.offset + TLV_HEADER_SIZE + THREAD_HEADER_SIZE;
 
   return {
     id: `thread-${threadId}`,
@@ -237,7 +239,8 @@ function parseThread(rec: TlvRecord): Thread {
     unknownFields: [],
     raw: toRawChunk(rec),
     body,
-    strings: extractPrintableStrings(body, rec.offset + TLV_HEADER_SIZE + THREAD_HEADER_SIZE),
+    strings: extractPrintableStrings(body, bodyAbsoluteOffset),
+    attachments: scanJpegs(body, bodyAbsoluteOffset),
     headerFlag: flag,
     headerSizeField: sizeField,
   };
@@ -428,6 +431,7 @@ export function summarizeBackup(backup: Backup): BackupSummary {
       bodyOffset,
       bodyLength: t.body.length,
       strings: t.strings,
+      attachments: t.attachments,
       headerFlag: t.headerFlag,
       headerSizeField: t.headerSizeField,
     };

@@ -1,11 +1,14 @@
 import type { ThreadSummary } from '../parser/types';
+import type { ParserClient } from '../worker/parserClient';
+import { AttachmentImage } from './AttachmentImage';
 
 interface Props {
   thread?: ThreadSummary | undefined;
+  client?: ParserClient | null | undefined;
   onJumpToOffset?: ((offset: number) => void) | undefined;
 }
 
-export function ThreadDetail({ thread, onJumpToOffset }: Props) {
+export function ThreadDetail({ thread, client, onJumpToOffset }: Props) {
   if (!thread) {
     return (
       <div
@@ -60,10 +63,33 @@ export function ThreadDetail({ thread, onJumpToOffset }: Props) {
         <span>
           strings: <strong>{thread.strings.length}</strong>
         </span>
+        <span>
+          attachments: <strong>{thread.attachments.length}</strong>
+        </span>
       </div>
+      {thread.attachments.length > 0 && client && (
+        <div
+          style={{
+            padding: '12px',
+            borderBottom: '1px solid var(--border)',
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))',
+            gap: 8,
+          }}
+        >
+          {thread.attachments.map((a) => (
+            <AttachmentImage
+              key={`${a.sourceOffset}:${a.length}`}
+              client={client}
+              attachment={a}
+              onJumpToOffset={onJumpToOffset}
+            />
+          ))}
+        </div>
+      )}
       <div style={{ padding: '8px 12px', fontSize: 12, color: 'var(--text-muted)' }}>
-        メッセージ本文は未デコード。添付データ（UUID / URL / MIME / PNG zlib / JPEG）は Step 7/8
-        で正式にパースします。以下は thread 本体に含まれる印字可能 ASCII 文字列の抜粋です。
+        メッセージ本文は未デコード。JPEG 添付は SOI/EOI スキャンで検出。PNG (zlib) は Step 8 で対応。
+        以下は thread 本体に含まれる印字可能 ASCII 文字列の抜粋です。
       </div>
       <div style={{ overflow: 'auto', flex: 1, padding: '0 12px 12px' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>

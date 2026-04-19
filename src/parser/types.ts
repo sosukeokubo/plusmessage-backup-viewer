@@ -43,6 +43,20 @@ export interface Attachment {
   sourceOffset: number;
 }
 
+/**
+ * Tokenised attachment reference — offset + length into the backup buffer,
+ * not the bytes themselves. The UI resolves these lazily via the Worker's
+ * slice API when a thumbnail scrolls into view.
+ */
+export interface AttachmentRef {
+  kind: 'image/jpeg' | 'image/png' | 'unknown';
+  contentType: string;
+  sourceOffset: number;
+  length: number;
+  /** Optional: uncompressed size (PNG zlib payloads populate this in Step 8). */
+  decompressedLength?: number;
+}
+
 export interface Message {
   id: string;
   text?: string;
@@ -71,6 +85,8 @@ export interface Thread {
   body: Uint8Array;
   /** Printable ASCII strings discovered inside the body (UUIDs, URLs, MIME types). */
   strings: ThreadString[];
+  /** Attachments discovered inside the thread body (JPEG for now, PNG in Step 8). */
+  attachments: AttachmentRef[];
   /** Unresolved bytes in the thread header (flag + size-like u32). */
   headerFlag: number;
   headerSizeField: number;
@@ -138,6 +154,7 @@ export interface ThreadSummary {
   bodyOffset: number;
   bodyLength: number;
   strings: ThreadString[];
+  attachments: AttachmentRef[];
   headerFlag: number;
   headerSizeField: number;
 }
