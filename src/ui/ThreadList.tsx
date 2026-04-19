@@ -1,9 +1,14 @@
+import { useRef } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import type { BackupSummary, ThreadSummary } from '../parser/types';
+import type { ThreadSort } from './SortControls';
 
 interface Props {
   backup: BackupSummary;
   selectedId?: string | undefined;
   onSelect: (id: string) => void;
+  threads: ThreadSummary[];
+  sort: ThreadSort;
 }
 
 function formatBytes(n: number): string {
@@ -12,7 +17,17 @@ function formatBytes(n: number): string {
   return `${(n / (1024 * 1024)).toFixed(2)} MB`;
 }
 
-export function ThreadList({ backup, selectedId, onSelect }: Props) {
+const ROW_HEIGHT = 40;
+
+export function ThreadList({ backup, selectedId, onSelect, threads, sort }: Props) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const virtualizer = useVirtualizer({
+    count: threads.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => ROW_HEIGHT,
+    overscan: 8,
+  });
+
   return (
     <div
       style={{
@@ -34,22 +49,55 @@ export function ThreadList({ backup, selectedId, onSelect }: Props) {
         }}
       >
         <strong style={{ color: 'var(--text)' }}>{backup.threads.length}</strong> threads
-        <span style={{ marginLeft: 8 }}>
-          · メッセージ本文は次ステップで解析予定
-        </span>
+        <span style={{ marginLeft: 8 }}>·</span>
+        <span style={{ marginLeft: 8 }}>{labelForSort(sort)}</span>
       </div>
-      <div style={{ overflow: 'auto', flex: 1 }}>
-        {backup.threads.map((t) => (
-          <ThreadRow
-            key={t.id}
-            thread={t}
-            selected={t.id === selectedId}
-            onClick={() => onSelect(t.id)}
-          />
-        ))}
+      <div ref={scrollRef} style={{ overflow: 'auto', flex: 1 }}>
+        <div
+          style={{
+            height: virtualizer.getTotalSize(),
+            position: 'relative',
+            width: '100%',
+          }}
+        >
+          {virtualizer.getVirtualItems().map((v) => {
+            const t = threads[v.index];
+            if (!t) return null;
+            return (
+              <div
+                key={t.id}
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  width: '100%',
+                  transform: `translateY(${v.start}px)`,
+                  height: v.size,
+                }}
+              >
+                <ThreadRow
+                  thread={t}
+                  selected={t.id === selectedId}
+                  onClick={() => onSelect(t.id)}
+                />
+              </div>
+            );
+          })}
+        </div>
       </div>
     </div>
   );
+}
+
+function labelForSort(sort: ThreadSort): string {
+  switch (sort) {
+    case 'file-order':
+      return 'ファイル順';
+    case 'body-size':
+      return 'サイズ降順';
+    case 'string-count':
+      return '文字列数降順';
+  }
 }
 
 function ThreadRow({
@@ -71,6 +119,7 @@ function ThreadRow({
         gap: 8,
         padding: '8px 12px',
         width: '100%',
+        height: '100%',
         textAlign: 'left',
         border: 'none',
         borderBottom: '1px dashed var(--border)',

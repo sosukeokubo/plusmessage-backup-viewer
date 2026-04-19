@@ -3,9 +3,11 @@ import { FilePicker } from './ui/FilePicker';
 import { PrivacyBanner } from './ui/PrivacyBanner';
 import { ThreadList } from './ui/ThreadList';
 import { ThreadDetail } from './ui/ThreadDetail';
+import { DarkModeToggle } from './ui/DarkModeToggle';
+import { SortControls, type ThreadSort } from './ui/SortControls';
 import { HexDump } from './debug/HexDump';
 import { TlvTree } from './debug/TlvTree';
-import type { BackupSummary, ParseProgress } from './parser/types';
+import type { BackupSummary, ParseProgress, ThreadSummary } from './parser/types';
 import { ParserClient } from './worker/parserClient';
 import { clearBlobCache } from './util/blobCache';
 
@@ -18,6 +20,7 @@ export function App() {
   const [jumpOffset, setJumpOffset] = useState<number | undefined>(undefined);
   const [showDebug, setShowDebug] = useState(false);
   const [selectedThreadId, setSelectedThreadId] = useState<string | undefined>(undefined);
+  const [threadSort, setThreadSort] = useState<ThreadSort>('file-order');
   const [client, setClient] = useState<ParserClient | null>(null);
   const clientRef = useRef<ParserClient | null>(null);
 
@@ -75,6 +78,11 @@ export function App() {
     return summary.threads.find((t) => t.id === selectedThreadId);
   }, [summary, selectedThreadId]);
 
+  const sortedThreads = useMemo(() => {
+    if (!summary) return [];
+    return sortThreads(summary.threads, threadSort);
+  }, [summary, threadSort]);
+
   const parseInFlight = bytes !== null && summary === null && parseError === null;
 
   return (
@@ -94,10 +102,13 @@ export function App() {
           ブラウザ内で完結。ファイルは送信されません。
         </span>
         {bytes && fileName && (
-          <span style={{ marginLeft: 'auto', color: 'var(--text-muted)', fontSize: 12 }}>
+          <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>
             {fileName} ({bytes.byteLength.toLocaleString()} B)
           </span>
         )}
+        <span style={{ marginLeft: 'auto' }}>
+          <DarkModeToggle />
+        </span>
       </header>
 
       <main style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: 20, gap: 16 }}>
@@ -118,6 +129,9 @@ export function App() {
                 />
                 デバッグビュー (TLV + hex)
               </label>
+              {!showDebug && summary && (
+                <SortControls value={threadSort} onChange={setThreadSort} />
+              )}
               {parseInFlight && <ProgressIndicator progress={progress} />}
               {parseError && (
                 <span style={{ color: 'var(--danger, #c33)', fontSize: 12 }}>
@@ -155,6 +169,8 @@ export function App() {
                     backup={summary}
                     selectedId={selectedThreadId}
                     onSelect={setSelectedThreadId}
+                    threads={sortedThreads}
+                    sort={threadSort}
                   />
                   <ThreadDetail
                     thread={selectedThread}
@@ -217,6 +233,17 @@ function ProgressIndicator({ progress }: { progress: ParseProgress | null }) {
       </span>
     </span>
   );
+}
+
+function sortThreads(threads: ThreadSummary[], sort: ThreadSort): ThreadSummary[] {
+  if (sort === 'file-order') return threads;
+  const copy = [...threads];
+  if (sort === 'body-size') {
+    copy.sort((a, b) => b.bodyLength - a.bodyLength);
+  } else if (sort === 'string-count') {
+    copy.sort((a, b) => b.strings.length - a.strings.length);
+  }
+  return copy;
 }
 
 function PlaceholderBox({ message }: { message: string }) {

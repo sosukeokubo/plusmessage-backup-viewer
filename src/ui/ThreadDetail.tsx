@@ -1,3 +1,5 @@
+import { useRef } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import type { ThreadSummary } from '../parser/types';
 import type { ParserClient } from '../worker/parserClient';
 import { AttachmentImage } from './AttachmentImage';
@@ -8,7 +10,17 @@ interface Props {
   onJumpToOffset?: ((offset: number) => void) | undefined;
 }
 
+const STRING_ROW_HEIGHT = 28;
+
 export function ThreadDetail({ thread, client, onJumpToOffset }: Props) {
+  const stringsScrollRef = useRef<HTMLDivElement>(null);
+  const virtualizer = useVirtualizer({
+    count: thread?.strings.length ?? 0,
+    getScrollElement: () => stringsScrollRef.current,
+    estimateSize: () => STRING_ROW_HEIGHT,
+    overscan: 12,
+  });
+
   if (!thread) {
     return (
       <div
@@ -88,50 +100,71 @@ export function ThreadDetail({ thread, client, onJumpToOffset }: Props) {
         </div>
       )}
       <div style={{ padding: '8px 12px', fontSize: 12, color: 'var(--text-muted)' }}>
-        メッセージ本文は未デコード。JPEG 添付は SOI/EOI スキャンで検出。PNG (zlib) は Step 8 で対応。
+        メッセージ本文は未デコード。JPEG/PNG 添付はバイナリパターン検出。
         以下は thread 本体に含まれる印字可能 ASCII 文字列の抜粋です。
       </div>
-      <div style={{ overflow: 'auto', flex: 1, padding: '0 12px 12px' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-          <thead>
-            <tr style={{ textAlign: 'left', color: 'var(--text-muted)' }}>
-              <th style={{ padding: '4px 8px', width: 110 }}>offset</th>
-              <th style={{ padding: '4px 8px', width: 60 }}>len</th>
-              <th style={{ padding: '4px 8px' }}>text</th>
-              <th style={{ padding: '4px 8px', width: 60 }}></th>
-            </tr>
-          </thead>
-          <tbody>
-            {thread.strings.map((s) => (
-              <tr key={s.offset} style={{ borderBottom: '1px dashed var(--border)' }}>
-                <td
-                  style={{
-                    padding: '4px 8px',
-                    fontFamily: 'var(--mono)',
-                    color: 'var(--text-muted)',
-                  }}
-                >
+      <div
+        style={{
+          padding: '4px 12px',
+          display: 'grid',
+          gridTemplateColumns: '110px 60px 1fr 60px',
+          gap: 8,
+          fontSize: 12,
+          color: 'var(--text-muted)',
+          borderBottom: '1px solid var(--border)',
+        }}
+      >
+        <span>offset</span>
+        <span>len</span>
+        <span>text</span>
+        <span />
+      </div>
+      <div ref={stringsScrollRef} style={{ overflow: 'auto', flex: 1 }}>
+        <div
+          style={{
+            height: virtualizer.getTotalSize(),
+            position: 'relative',
+            width: '100%',
+          }}
+        >
+          {virtualizer.getVirtualItems().map((v) => {
+            const s = thread.strings[v.index];
+            if (!s) return null;
+            return (
+              <div
+                key={s.offset}
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  width: '100%',
+                  transform: `translateY(${v.start}px)`,
+                  height: v.size,
+                  display: 'grid',
+                  gridTemplateColumns: '110px 60px 1fr 60px',
+                  gap: 8,
+                  alignItems: 'center',
+                  padding: '0 12px',
+                  borderBottom: '1px dashed var(--border)',
+                  fontSize: 12,
+                  fontFamily: 'var(--mono)',
+                }}
+              >
+                <span style={{ color: 'var(--text-muted)' }}>
                   0x{s.offset.toString(16).padStart(8, '0')}
-                </td>
-                <td
+                </span>
+                <span style={{ color: 'var(--text-muted)' }}>{s.length}</span>
+                <span
                   style={{
-                    padding: '4px 8px',
-                    fontFamily: 'var(--mono)',
-                    color: 'var(--text-muted)',
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
                   }}
-                >
-                  {s.length}
-                </td>
-                <td
-                  style={{
-                    padding: '4px 8px',
-                    fontFamily: 'var(--mono)',
-                    wordBreak: 'break-all',
-                  }}
+                  title={s.text}
                 >
                   {s.text}
-                </td>
-                <td style={{ padding: '4px 8px', textAlign: 'right' }}>
+                </span>
+                <span style={{ textAlign: 'right' }}>
                   {onJumpToOffset && (
                     <button
                       type="button"
@@ -141,11 +174,11 @@ export function ThreadDetail({ thread, client, onJumpToOffset }: Props) {
                       hex へ
                     </button>
                   )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+                </span>
+              </div>
+            );
+          })}
+        </div>
       </div>
     </div>
   );
