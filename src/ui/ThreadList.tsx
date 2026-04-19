@@ -1,7 +1,7 @@
-import type { Backup, Thread } from '../parser/types';
+import type { BackupSummary, ThreadSummary } from '../parser/types';
 
 interface Props {
-  backup: Backup;
+  backup: BackupSummary;
   selectedId?: string | undefined;
   onSelect: (id: string) => void;
 }
@@ -57,7 +57,7 @@ function ThreadRow({
   selected,
   onClick,
 }: {
-  thread: Thread;
+  thread: ThreadSummary;
   selected: boolean;
   onClick: () => void;
 }) {
@@ -88,7 +88,7 @@ function ThreadRow({
         strings: {thread.strings.length} · flag 0x{thread.headerFlag.toString(16).padStart(2, '0')}
       </span>
       <span style={{ color: 'var(--text-muted)', textAlign: 'right' }}>
-        {formatBytes(thread.body.length)}
+        {formatBytes(thread.bodyLength)}
       </span>
     </button>
   );

@@ -20,12 +20,19 @@ import {
 import { iterateTlvs, readTlv } from './tlv';
 import type {
   Backup,
+  BackupSummary,
   Contact,
+  ContactSummary,
   KeyValueItem,
+  KeyValueItemSummary,
   Meta,
+  MetaSummary,
+  ParseProgress,
   RawChunk,
+  RawChunkSummary,
   Thread,
   ThreadString,
+  ThreadSummary,
   TlvRecord,
 } from './types';
 
@@ -236,9 +243,31 @@ function parseThread(rec: TlvRecord): Thread {
   };
 }
 
-function parseMessages(rec: TlvRecord): Thread[] {
+function parseMessages(
+  rec: TlvRecord,
+  onProgress?: (p: ParseProgress) => void,
+): Thread[] {
+  // readCountedContainer yields records whose offsets are relative to the
+  // container content. Rebase them to absolute file offsets so downstream
+  // consumers (strings, summaries, hex jumps) see real positions.
+  const baseOffset = rec.offset + TLV_HEADER_SIZE;
   const records = readCountedContainer(rec.content, SECTION_THREAD);
-  return records.map(parseThread);
+  const out: Thread[] = [];
+  const total = records.length;
+  const emitEvery = Math.max(1, Math.floor(total / 20)); // ~5% steps
+  for (let i = 0; i < total; i += 1) {
+    const rel = records[i]!;
+    const abs: TlvRecord = { ...rel, offset: baseOffset + rel.offset };
+    out.push(parseThread(abs));
+    if (onProgress && (i % emitEvery === emitEvery - 1 || i === total - 1)) {
+      onProgress({
+        stage: 'threads',
+        progress: 0.3 + 0.6 * ((i + 1) / total),
+        note: `thread ${i + 1} / ${total}`,
+      });
+    }
+  }
+  return out;
 }
 
 /**
@@ -282,7 +311,10 @@ function extractPrintableStrings(body: Uint8Array, baseOffset: number): ThreadSt
   return out;
 }
 
-export function parseBackup(buffer: Uint8Array): Backup {
+export function parseBackup(
+  buffer: Uint8Array,
+  onProgress?: (p: ParseProgress) => void,
+): Backup {
   const fileSize = buffer.byteLength;
 
   if (!isMagicAt(buffer, 0)) {
@@ -302,20 +334,25 @@ export function parseBackup(buffer: Uint8Array): Backup {
   let settings: RawChunk | undefined;
   const threads: Thread[] = [];
 
+  onProgress?.({ stage: 'scan', progress: 0.05, note: 'header' });
+
   for (const rec of iterateTlvs(reader)) {
     sections.push(toRawChunk(rec));
     switch (rec.type) {
       case SECTION_META:
+        onProgress?.({ stage: 'meta', progress: 0.1 });
         meta = parseMeta(rec);
         break;
       case SECTION_CONTACTS:
+        onProgress?.({ stage: 'contacts', progress: 0.2 });
         contacts.push(...parseContacts(rec));
         break;
       case SECTION_SETTINGS:
         settings = toRawChunk(rec);
         break;
       case SECTION_MESSAGES:
-        threads.push(...parseMessages(rec));
+        onProgress?.({ stage: 'threads', progress: 0.3 });
+        threads.push(...parseMessages(rec, onProgress));
         break;
       case SECTION_END:
         break;
@@ -337,5 +374,77 @@ export function parseBackup(buffer: Uint8Array): Backup {
   };
   if (meta) backup.meta = meta;
   if (settings) backup.settings = settings;
+  onProgress?.({ stage: 'done', progress: 1 });
   return backup;
+}
+
+/**
+ * Convert the byte-heavy {@link Backup} into a lightweight {@link BackupSummary}
+ * safe to ship across the Worker/main postMessage boundary. All `bytes`,
+ * `body`, and `valueRaw` buffers are replaced with offset+length references;
+ * consumers that need the actual bytes must resolve them against the main
+ * buffer (or, later, via the Worker's slice API).
+ */
+export function summarizeBackup(backup: Backup): BackupSummary {
+  const summarizeChunk = (c: RawChunk): RawChunkSummary => ({
+    type: c.type,
+    offset: c.offset,
+    length: c.bytes.length,
+  });
+
+  const summarizeKv = (kv: KeyValueItem): KeyValueItemSummary => ({
+    key: kv.key,
+    valueUtf8: kv.valueUtf8,
+    offset: kv.offset,
+    length: kv.raw.length,
+  });
+
+  const summarizeMeta = (m: Meta): MetaSummary => ({
+    items: m.items.map(summarizeKv),
+    raw: summarizeChunk(m.raw),
+  });
+
+  const summarizeContact = (c: Contact): ContactSummary => {
+    const out: ContactSummary = {
+      raw: summarizeChunk(c.raw),
+      phone: c.phone,
+      fields: c.fields,
+      otherRecords: c.otherRecords,
+    };
+    if (c.name !== undefined) out.name = c.name;
+    return out;
+  };
+
+  const summarizeThread = (t: Thread): ThreadSummary => {
+    // body is a subarray of the original buffer — recover its absolute offset
+    // from the thread record offset + TLV header + 11-byte thread header.
+    const bodyOffset = t.raw.offset + TLV_HEADER_SIZE + THREAD_HEADER_SIZE;
+    const out: ThreadSummary = {
+      id: t.id,
+      threadId: t.threadId,
+      isGroup: t.isGroup,
+      messageCount: t.messageCount,
+      raw: summarizeChunk(t.raw),
+      bodyOffset,
+      bodyLength: t.body.length,
+      strings: t.strings,
+      headerFlag: t.headerFlag,
+      headerSizeField: t.headerSizeField,
+    };
+    if (t.peerPhone !== undefined) out.peerPhone = t.peerPhone;
+    return out;
+  };
+
+  const summary: BackupSummary = {
+    contacts: backup.contacts.map(summarizeContact),
+    threads: backup.threads.map(summarizeThread),
+    sections: backup.sections.map(summarizeChunk),
+    unknownSections: backup.unknownSections.map(summarizeChunk),
+    bytesConsumed: backup.bytesConsumed,
+    fileSize: backup.fileSize,
+    parserVersion: backup.parserVersion,
+  };
+  if (backup.meta) summary.meta = summarizeMeta(backup.meta);
+  if (backup.settings) summary.settings = summarizeChunk(backup.settings);
+  return summary;
 }

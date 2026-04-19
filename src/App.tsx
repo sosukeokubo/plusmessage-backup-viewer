@@ -1,38 +1,74 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FilePicker } from './ui/FilePicker';
 import { PrivacyBanner } from './ui/PrivacyBanner';
 import { ThreadList } from './ui/ThreadList';
 import { ThreadDetail } from './ui/ThreadDetail';
 import { HexDump } from './debug/HexDump';
 import { TlvTree } from './debug/TlvTree';
-import { parseBackup } from './parser';
-import type { Backup } from './parser/types';
-
-interface ParseResult {
-  backup?: Backup;
-  error?: string;
-}
+import type { BackupSummary, ParseProgress } from './parser/types';
+import { ParserClient } from './worker/parserClient';
 
 export function App() {
   const [bytes, setBytes] = useState<Uint8Array | null>(null);
   const [fileName, setFileName] = useState<string | null>(null);
+  const [summary, setSummary] = useState<BackupSummary | null>(null);
+  const [progress, setProgress] = useState<ParseProgress | null>(null);
+  const [parseError, setParseError] = useState<string | null>(null);
   const [jumpOffset, setJumpOffset] = useState<number | undefined>(undefined);
   const [showDebug, setShowDebug] = useState(false);
   const [selectedThreadId, setSelectedThreadId] = useState<string | undefined>(undefined);
+  const clientRef = useRef<ParserClient | null>(null);
 
-  const parseResult = useMemo<ParseResult | null>(() => {
-    if (!bytes) return null;
-    try {
-      return { backup: parseBackup(bytes) };
-    } catch (err) {
-      return { error: err instanceof Error ? err.message : String(err) };
-    }
-  }, [bytes]);
+  useEffect(() => {
+    return () => {
+      clientRef.current?.terminate();
+      clientRef.current = null;
+    };
+  }, []);
+
+  const handleFile = useCallback((file: File, buffer: ArrayBuffer) => {
+    // Keep a main-thread copy for HexDump; transfer the original buffer to
+    // the Worker so it owns a second copy for slice requests (attachments).
+    const mainCopy = new Uint8Array(buffer.slice(0));
+    setBytes(mainCopy);
+    setFileName(file.name);
+    setSummary(null);
+    setParseError(null);
+    setProgress({ stage: 'scan', progress: 0 });
+    setSelectedThreadId(undefined);
+    setJumpOffset(undefined);
+
+    clientRef.current?.terminate();
+    const client = new ParserClient();
+    clientRef.current = client;
+    client
+      .parse(buffer, { onProgress: setProgress })
+      .then((s) => {
+        setSummary(s);
+      })
+      .catch((err: Error) => {
+        setParseError(err.message);
+      });
+  }, []);
+
+  const handleReset = useCallback(() => {
+    clientRef.current?.terminate();
+    clientRef.current = null;
+    setBytes(null);
+    setFileName(null);
+    setSummary(null);
+    setParseError(null);
+    setProgress(null);
+    setJumpOffset(undefined);
+    setSelectedThreadId(undefined);
+  }, []);
 
   const selectedThread = useMemo(() => {
-    if (!parseResult?.backup) return undefined;
-    return parseResult.backup.threads.find((t) => t.id === selectedThreadId);
-  }, [parseResult, selectedThreadId]);
+    if (!summary) return undefined;
+    return summary.threads.find((t) => t.id === selectedThreadId);
+  }, [summary, selectedThreadId]);
+
+  const parseInFlight = bytes !== null && summary === null && parseError === null;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
@@ -61,26 +97,12 @@ export function App() {
         {!bytes ? (
           <>
             <PrivacyBanner />
-            <FilePicker
-              onFile={(file, buffer) => {
-                setFileName(file.name);
-                setBytes(new Uint8Array(buffer));
-              }}
-            />
+            <FilePicker onFile={(file, buffer) => handleFile(file, buffer)} />
           </>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12, minHeight: 0, flex: 1 }}>
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-              <button
-                onClick={() => {
-                  setBytes(null);
-                  setFileName(null);
-                  setJumpOffset(undefined);
-                  setSelectedThreadId(undefined);
-                }}
-              >
-                別のファイルを読み込む
-              </button>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              <button onClick={handleReset}>別のファイルを読み込む</button>
               <label style={{ fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
                 <input
                   type="checkbox"
@@ -89,9 +111,10 @@ export function App() {
                 />
                 デバッグビュー (TLV + hex)
               </label>
-              {parseResult?.error && (
+              {parseInFlight && <ProgressIndicator progress={progress} />}
+              {parseError && (
                 <span style={{ color: 'var(--danger, #c33)', fontSize: 12 }}>
-                  parse error: {parseResult.error}
+                  parse error: {parseError}
                 </span>
               )}
             </div>
@@ -106,17 +129,23 @@ export function App() {
             >
               {showDebug ? (
                 <>
-                  {parseResult?.backup ? (
-                    <TlvTree backup={parseResult.backup} onJumpTo={setJumpOffset} />
+                  {summary ? (
+                    <TlvTree backup={summary} onJumpTo={setJumpOffset} />
                   ) : (
-                    <PlaceholderBox message="パース結果を表示できません。" />
+                    <PlaceholderBox
+                      message={
+                        parseError
+                          ? 'パース結果を表示できません。'
+                          : 'パース中…'
+                      }
+                    />
                   )}
                   <HexDump bytes={bytes} jumpToOffset={jumpOffset} />
                 </>
-              ) : parseResult?.backup ? (
+              ) : summary ? (
                 <>
                   <ThreadList
-                    backup={parseResult.backup}
+                    backup={summary}
                     selectedId={selectedThreadId}
                     onSelect={setSelectedThreadId}
                   />
@@ -129,7 +158,13 @@ export function App() {
                   />
                 </>
               ) : (
-                <PlaceholderBox message="パース結果を表示できません。デバッグビューで生バイトを確認できます。" />
+                <PlaceholderBox
+                  message={
+                    parseError
+                      ? 'パース結果を表示できません。デバッグビューで生バイトを確認できます。'
+                      : 'パース中…'
+                  }
+                />
               )}
             </div>
           </div>
@@ -150,6 +185,29 @@ export function App() {
         <span>v0.1.0</span>
       </footer>
     </div>
+  );
+}
+
+function ProgressIndicator({ progress }: { progress: ParseProgress | null }) {
+  const value = progress?.progress ?? 0;
+  const stage = progress?.stage ?? 'scan';
+  const note = progress?.note;
+  return (
+    <span
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 8,
+        fontSize: 12,
+        color: 'var(--text-muted)',
+      }}
+    >
+      <progress value={value} max={1} style={{ width: 120 }} />
+      <span>
+        {stage}
+        {note ? ` — ${note}` : ''} ({Math.round(value * 100)}%)
+      </span>
+    </span>
   );
 }
 

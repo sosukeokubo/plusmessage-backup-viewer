@@ -13,7 +13,8 @@ import {
   SECTION_META,
   SECTION_THREAD,
 } from '../src/parser/constants';
-import { parseBackup } from '../src/parser';
+import { parseBackup, summarizeBackup } from '../src/parser';
+import type { ParseProgress } from '../src/parser/types';
 
 function u32le(n: number): Uint8Array {
   const b = new Uint8Array(4);
@@ -186,6 +187,51 @@ describe('parseBackup — THREAD', () => {
     const strings = backup.threads[0]?.strings ?? [];
     expect(strings.map((s) => s.text)).toEqual(['ABCDEF', 'uuid-1234']);
     expect(strings[0]?.length).toBe(6);
+  });
+
+  it('emits progress events for each thread with monotonic progress', () => {
+    const body = ascii('xx aaaaaa ');
+    const messages = tlv(
+      SECTION_MESSAGES,
+      concat(
+        u32le(3),
+        threadRecord(1, 0x00, 0, body),
+        threadRecord(2, 0x00, 0, body),
+        threadRecord(3, 0x00, 0, body),
+      ),
+    );
+    const events: ParseProgress[] = [];
+    parseBackup(buildMinimalBackup([messages]), (p) => events.push(p));
+    expect(events.length).toBeGreaterThan(0);
+    expect(events[events.length - 1]?.stage).toBe('done');
+    const progresses = events.map((e) => e.progress);
+    for (let i = 1; i < progresses.length; i += 1) {
+      expect(progresses[i]!).toBeGreaterThanOrEqual(progresses[i - 1]!);
+    }
+  });
+
+  it('summarizeBackup drops bytes/body but keeps offset+length references', () => {
+    const body = ascii('aaaaaa-bbbbbb');
+    const messages = tlv(SECTION_MESSAGES, concat(u32le(1), threadRecord(42, 0x01, 99, body)));
+    const bytes = buildMinimalBackup([messages]);
+    const backup = parseBackup(bytes);
+    const summary = summarizeBackup(backup);
+
+    expect(summary.threads).toHaveLength(1);
+    const t0 = summary.threads[0]!;
+    expect(t0.threadId).toBe(42);
+    expect(t0.bodyLength).toBe(body.length);
+    expect(t0.headerFlag).toBe(0x01);
+    expect(t0.headerSizeField).toBe(99);
+    // bodyOffset should point into the original buffer at the thread body.
+    const slice = bytes.subarray(t0.bodyOffset, t0.bodyOffset + t0.bodyLength);
+    expect(Array.from(slice)).toEqual(Array.from(body));
+
+    // sections carry length but no bytes.
+    for (const s of summary.sections) {
+      expect(typeof s.length).toBe('number');
+      expect((s as unknown as { bytes?: unknown }).bytes).toBeUndefined();
+    }
   });
 
   it('throws when a thread has non-zero padding', () => {

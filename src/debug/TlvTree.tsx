@@ -1,9 +1,9 @@
 import { useMemo } from 'react';
-import type { Backup, RawChunk } from '../parser/types';
+import type { BackupSummary, RawChunkSummary } from '../parser/types';
 import { SECTION_NAMES } from '../parser/constants';
 
 interface Props {
-  backup: Backup;
+  backup: BackupSummary;
   onJumpTo?: ((offset: number) => void) | undefined;
 }
 
@@ -19,7 +19,7 @@ function SectionRow({
   chunk,
   onJumpTo,
 }: {
-  chunk: RawChunk;
+  chunk: RawChunkSummary;
   onJumpTo?: ((offset: number) => void) | undefined;
 }) {
   const name = labelFor(chunk.type);
@@ -39,7 +39,7 @@ function SectionRow({
       <span style={{ color: 'var(--accent)' }}>{formatHex(chunk.type, 4)}</span>
       <span>{name}</span>
       <span style={{ color: 'var(--text-muted)' }}>
-        offset {formatHex(chunk.offset, 8)} · {chunk.bytes.length.toLocaleString()} B
+        offset {formatHex(chunk.offset, 8)} · {chunk.length.toLocaleString()} B
       </span>
       {onJumpTo && (
         <button

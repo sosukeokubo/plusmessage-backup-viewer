@@ -1,7 +1,7 @@
-import type { Thread } from '../parser/types';
+import type { ThreadSummary } from '../parser/types';
 
 interface Props {
-  thread?: Thread | undefined;
+  thread?: ThreadSummary | undefined;
   onJumpToOffset?: ((offset: number) => void) | undefined;
 }
 
@@ -49,7 +49,7 @@ export function ThreadDetail({ thread, onJumpToOffset }: Props) {
           <strong>#{thread.threadId}</strong>
         </span>
         <span>
-          body: <strong>{thread.body.length.toLocaleString()}</strong> B
+          body: <strong>{thread.bodyLength.toLocaleString()}</strong> B
         </span>
         <span>
           flag: <code>0x{thread.headerFlag.toString(16).padStart(2, '0')}</code>

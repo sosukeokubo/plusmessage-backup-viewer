@@ -93,3 +93,69 @@ export interface Backup {
   fileSize: number;
   parserVersion: string;
 }
+
+/**
+ * Lightweight structural summaries sent from the parser Worker to the main
+ * thread. Everything that would otherwise duplicate the file buffer (bytes
+ * carried on RawChunk, Thread.body, Contact.valueRaw, etc.) is dropped here
+ * — the UI only needs type/offset/length and the small derived fields. When
+ * the UI needs raw bytes (hex view, attachments), it asks the Worker for a
+ * slice via offset+length.
+ */
+export interface RawChunkSummary {
+  type: number;
+  offset: number;
+  length: number;
+}
+
+export interface KeyValueItemSummary {
+  key: string;
+  valueUtf8: string;
+  offset: number;
+  length: number;
+}
+
+export interface MetaSummary {
+  items: KeyValueItemSummary[];
+  raw: RawChunkSummary;
+}
+
+export interface ContactSummary {
+  raw: RawChunkSummary;
+  phone: string;
+  name?: string;
+  fields: string[];
+  otherRecords: string[];
+}
+
+export interface ThreadSummary {
+  id: string;
+  threadId: number;
+  peerPhone?: string;
+  isGroup: boolean;
+  messageCount: number;
+  raw: RawChunkSummary;
+  bodyOffset: number;
+  bodyLength: number;
+  strings: ThreadString[];
+  headerFlag: number;
+  headerSizeField: number;
+}
+
+export interface BackupSummary {
+  meta?: MetaSummary;
+  contacts: ContactSummary[];
+  settings?: RawChunkSummary;
+  threads: ThreadSummary[];
+  sections: RawChunkSummary[];
+  unknownSections: RawChunkSummary[];
+  bytesConsumed: number;
+  fileSize: number;
+  parserVersion: string;
+}
+
+export interface ParseProgress {
+  stage: 'scan' | 'meta' | 'contacts' | 'threads' | 'summarize' | 'done';
+  progress: number; // 0.0 – 1.0
+  note?: string;
+}
