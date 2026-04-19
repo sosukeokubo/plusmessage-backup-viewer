@@ -142,26 +142,33 @@ export function HexDump({ bytes, bytesPerRow = 16, rowHeight = 20, jumpToOffset 
         }}
       >
         <div style={{ height: totalHeight, position: 'relative' }}>
-          {rows.map((row) => (
-            <div
-              key={row.offset}
-              style={{
-                position: 'absolute',
-                top: Math.floor(row.offset / bytesPerRow) * rowHeight,
-                left: 0,
-                right: 0,
-                display: 'grid',
-                gridTemplateColumns: '90px 1fr 180px',
-                gap: 16,
-                padding: '0 12px',
-                whiteSpace: 'pre',
-              }}
-            >
-              <span style={{ color: 'var(--text-muted)' }}>{formatOffset(row.offset)}</span>
-              <span>{row.hex}</span>
-              <span style={{ color: 'var(--text-muted)' }}>{row.ascii}</span>
-            </div>
-          ))}
+          {rows.map((row) => {
+            const highlighted =
+              jumpToOffset != null &&
+              jumpToOffset >= row.offset &&
+              jumpToOffset < row.offset + bytesPerRow;
+            return (
+              <div
+                key={row.offset}
+                style={{
+                  position: 'absolute',
+                  top: Math.floor(row.offset / bytesPerRow) * rowHeight,
+                  left: 0,
+                  right: 0,
+                  display: 'grid',
+                  gridTemplateColumns: '90px 1fr 180px',
+                  gap: 16,
+                  padding: '0 12px',
+                  whiteSpace: 'pre',
+                  background: highlighted ? 'var(--accent-weak)' : 'transparent',
+                }}
+              >
+                <span style={{ color: 'var(--text-muted)' }}>{formatOffset(row.offset)}</span>
+                <span>{row.hex}</span>
+                <span style={{ color: 'var(--text-muted)' }}>{row.ascii}</span>
+              </div>
+            );
+          })}
         </div>
       </div>
     </div>

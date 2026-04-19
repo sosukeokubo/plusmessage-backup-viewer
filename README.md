@@ -18,12 +18,29 @@ pnpm preview       # dist/ を本番同等で serve
 
 - React + Vite + TypeScript
 - パーサは `src/parser/`（DOM非依存、Vitestで直接テスト可能）
-- 重いバイト操作は Web Worker に委譲予定（Step 6 以降）
+- 重いバイト操作は Web Worker（`src/worker/parser.worker.ts`）に委譲、メイン側は summary のみ保持
 
 ## プライバシー
 
 - ログ、アナリティクス、エラー送信はすべて **Off**
 - CSP で外部通信を制限（`public/_headers` で指定、Cloudflare Pages 配信時に有効）
+
+## デプロイ（Cloudflare Pages）
+
+`public/_headers` が `dist/` にそのまま配置されるので、Cloudflare Pages にデプロイするだけで CSP / COOP / Referrer-Policy などのヘッダが有効になる。
+
+```bash
+pnpm build
+# ローカル確認
+pnpm preview
+# デプロイ（wrangler をインストール済みの場合）
+npx wrangler pages deploy dist/
+```
+
+### プライバシー検証
+
+- DevTools → Network タブで、静的アセット以外の通信が発生しないことを確認
+- `curl -I <公開URL>` で `Content-Security-Policy` / `Cross-Origin-Opener-Policy` が配信されていることを確認
 
 ## スコープ
 

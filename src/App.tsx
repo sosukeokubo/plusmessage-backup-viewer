@@ -151,7 +151,11 @@ export function App() {
               {showDebug ? (
                 <>
                   {summary ? (
-                    <TlvTree backup={summary} onJumpTo={setJumpOffset} />
+                    <TlvTree
+                      backup={summary}
+                      onJumpTo={setJumpOffset}
+                      highlightOffset={jumpOffset}
+                    />
                   ) : (
                     <PlaceholderBox
                       message={
