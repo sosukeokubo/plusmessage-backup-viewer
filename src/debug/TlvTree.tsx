@@ -1,0 +1,125 @@
+import { useMemo } from 'react';
+import type { Backup, RawChunk } from '../parser/types';
+import { SECTION_NAMES } from '../parser/constants';
+
+interface Props {
+  backup: Backup;
+  onJumpTo?: ((offset: number) => void) | undefined;
+}
+
+function formatHex(n: number, width: number): string {
+  return `0x${n.toString(16).toUpperCase().padStart(width, '0')}`;
+}
+
+function labelFor(type: number): string {
+  return SECTION_NAMES[type] ?? 'UNKNOWN';
+}
+
+function SectionRow({
+  chunk,
+  onJumpTo,
+}: {
+  chunk: RawChunk;
+  onJumpTo?: ((offset: number) => void) | undefined;
+}) {
+  const name = labelFor(chunk.type);
+  return (
+    <div
+      style={{
+        display: 'grid',
+        gridTemplateColumns: '90px 120px 1fr 110px',
+        gap: 8,
+        padding: '4px 8px',
+        borderBottom: '1px dashed var(--border)',
+        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+        fontSize: 12,
+        alignItems: 'center',
+      }}
+    >
+      <span style={{ color: 'var(--accent)' }}>{formatHex(chunk.type, 4)}</span>
+      <span>{name}</span>
+      <span style={{ color: 'var(--text-muted)' }}>
+        offset {formatHex(chunk.offset, 8)} · {chunk.bytes.length.toLocaleString()} B
+      </span>
+      {onJumpTo && (
+        <button
+          onClick={() => onJumpTo(chunk.offset)}
+          style={{ fontSize: 11, padding: '2px 6px' }}
+        >
+          hex へ
+        </button>
+      )}
+    </div>
+  );
+}
+
+export function TlvTree({ backup, onJumpTo }: Props) {
+  const stats = useMemo(() => {
+    const counts = new Map<number, number>();
+    for (const s of backup.sections) {
+      counts.set(s.type, (counts.get(s.type) ?? 0) + 1);
+    }
+    const owner = backup.meta?.items.find((it) => it.key === 'backup_owner')?.valueUtf8;
+    return {
+      total: backup.sections.length,
+      counts,
+      threads: backup.threads.length,
+      contacts: backup.contacts.length,
+      metaItems: backup.meta?.items.length ?? 0,
+      owner,
+    };
+  }, [backup]);
+
+  const consumedPct = ((backup.bytesConsumed / backup.fileSize) * 100).toFixed(2);
+
+  return (
+    <div
+      style={{
+        border: '1px solid var(--border)',
+        borderRadius: 6,
+        background: 'var(--bg-elev)',
+        display: 'flex',
+        flexDirection: 'column',
+        minHeight: 0,
+        flex: 1,
+      }}
+    >
+      <div
+        style={{
+          padding: '8px 12px',
+          borderBottom: '1px solid var(--border)',
+          display: 'flex',
+          gap: 16,
+          flexWrap: 'wrap',
+          fontSize: 12,
+        }}
+      >
+        {stats.owner && (
+          <span>
+            Backup owner: <strong>{stats.owner}</strong>
+          </span>
+        )}
+        <span>
+          <strong>{stats.total}</strong> セクション
+        </span>
+        <span>
+          threads: <strong>{stats.threads}</strong>
+        </span>
+        <span>
+          contacts: <strong>{stats.contacts}</strong>
+        </span>
+        <span>
+          meta items: <strong>{stats.metaItems}</strong>
+        </span>
+        <span>
+          consumed: <strong>{backup.bytesConsumed.toLocaleString()}</strong> / {backup.fileSize.toLocaleString()} B ({consumedPct}%)
+        </span>
+      </div>
+      <div style={{ overflow: 'auto', flex: 1 }}>
+        {backup.sections.map((s) => (
+          <SectionRow key={`${s.offset}`} chunk={s} onJumpTo={onJumpTo} />
+        ))}
+      </div>
+    </div>
+  );
+}

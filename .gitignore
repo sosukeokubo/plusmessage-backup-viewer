@@ -1,0 +1,31 @@
+node_modules
+dist
+coverage
+.vite
+.DS_Store
+
+# tsc --build artifacts
+*.tsbuildinfo
+
+# agent tooling local state
+.claude/
+
+# user backup data — NEVER commit
+*.backup
+fixtures/private/
+
+# logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# editor
+.vscode/*
+!.vscode/extensions.json
+.idea
+
+# local overrides
+.env.local
+.env.*.local
