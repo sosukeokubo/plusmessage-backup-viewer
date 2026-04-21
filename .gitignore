@@ -4,6 +4,10 @@ coverage
 .vite
 .DS_Store
 
+# test / verification artifacts
+.playwright-mcp/
+/*.png
+
 # tsc --build artifacts
 *.tsbuildinfo
 

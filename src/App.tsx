@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { FilePicker } from './ui/FilePicker';
-import { PrivacyBanner } from './ui/PrivacyBanner';
+import { WelcomeScreen } from './ui/WelcomeScreen';
 import { ThreadList } from './ui/ThreadList';
 import { ThreadDetail } from './ui/ThreadDetail';
 import { DarkModeToggle } from './ui/DarkModeToggle';
@@ -10,6 +9,29 @@ import { TlvTree } from './debug/TlvTree';
 import type { BackupSummary, ParseProgress, ThreadSummary } from './parser/types';
 import { ParserClient } from './worker/parserClient';
 import { clearBlobCache } from './util/blobCache';
+import {
+  buildContactIndex,
+  resolveThreadContact,
+  type ResolvedContact,
+} from './util/contactResolver';
+
+const STAGE_LABEL: Record<ParseProgress['stage'], string> = {
+  scan: 'バックアップを確認中…',
+  meta: '基本情報を読み取り中…',
+  contacts: '連絡先を読み取り中…',
+  threads: '会話を読み取り中…',
+  summarize: 'もう少しで完了します…',
+  done: '読込完了',
+};
+
+function readDebugFlag(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    return new URLSearchParams(window.location.search).get('debug') === '1';
+  } catch {
+    return false;
+  }
+}
 
 export function App() {
   const [bytes, setBytes] = useState<Uint8Array | null>(null);
@@ -21,8 +43,10 @@ export function App() {
   const [showDebug, setShowDebug] = useState(false);
   const [selectedThreadId, setSelectedThreadId] = useState<string | undefined>(undefined);
   const [threadSort, setThreadSort] = useState<ThreadSort>('file-order');
+  const [searchQuery, setSearchQuery] = useState('');
   const [client, setClient] = useState<ParserClient | null>(null);
   const clientRef = useRef<ParserClient | null>(null);
+  const debugEnabled = useMemo(() => readDebugFlag(), []);
 
   useEffect(() => {
     return () => {
@@ -33,8 +57,6 @@ export function App() {
   }, []);
 
   const handleFile = useCallback((file: File, buffer: ArrayBuffer) => {
-    // Keep a main-thread copy for HexDump; transfer the original buffer to
-    // the Worker so it owns a second copy for slice requests (attachments).
     const mainCopy = new Uint8Array(buffer.slice(0));
     setBytes(mainCopy);
     setFileName(file.name);
@@ -43,6 +65,7 @@ export function App() {
     setProgress({ stage: 'scan', progress: 0 });
     setSelectedThreadId(undefined);
     setJumpOffset(undefined);
+    setSearchQuery('');
 
     clientRef.current?.terminate();
     clearBlobCache();
@@ -71,17 +94,54 @@ export function App() {
     setProgress(null);
     setJumpOffset(undefined);
     setSelectedThreadId(undefined);
+    setSearchQuery('');
   }, []);
+
+  const contactIndex = useMemo(() => {
+    if (!summary) return new Map();
+    return buildContactIndex(summary.contacts);
+  }, [summary]);
+
+  // Stable index per thread based on its position in the original file. Used
+  // so fallback labels like "会話 5" stay the same regardless of current sort
+  // or filter — otherwise a user searching "会話 5" would see the 5th result
+  // rename itself to "会話 1".
+  const threadFileIndex = useMemo(() => {
+    const map = new Map<string, number>();
+    if (summary) summary.threads.forEach((t, i) => map.set(t.id, i));
+    return map;
+  }, [summary]);
+
+  const sortedThreads = useMemo(() => {
+    if (!summary) return [];
+    return sortThreads(summary.threads, threadSort);
+  }, [summary, threadSort]);
+
+  const resolveForThread = useCallback(
+    (thread: ThreadSummary): ResolvedContact =>
+      resolveThreadContact(thread, contactIndex, threadFileIndex.get(thread.id) ?? 0),
+    [contactIndex, threadFileIndex],
+  );
+
+  const filteredThreads = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return sortedThreads;
+    return sortedThreads.filter((t) => {
+      const c = resolveForThread(t);
+      const hay = `${c.displayName} ${t.peerPhone ?? ''}`.toLowerCase();
+      return hay.includes(q);
+    });
+  }, [sortedThreads, searchQuery, resolveForThread]);
 
   const selectedThread = useMemo(() => {
     if (!summary) return undefined;
     return summary.threads.find((t) => t.id === selectedThreadId);
   }, [summary, selectedThreadId]);
 
-  const sortedThreads = useMemo(() => {
-    if (!summary) return [];
-    return sortThreads(summary.threads, threadSort);
-  }, [summary, threadSort]);
+  const selectedContact = useMemo((): ResolvedContact | undefined => {
+    if (!selectedThread) return undefined;
+    return resolveForThread(selectedThread);
+  }, [selectedThread, resolveForThread]);
 
   const parseInFlight = bytes !== null && summary === null && parseError === null;
 
@@ -95,54 +155,79 @@ export function App() {
           display: 'flex',
           alignItems: 'center',
           gap: 12,
+          flexWrap: 'wrap',
         }}
       >
-        <strong style={{ fontSize: 16 }}>PlusMessage Backup Viewer</strong>
-        <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>
-          ブラウザ内で完結。ファイルは送信されません。
-        </span>
-        {bytes && fileName && (
+        <strong style={{ fontSize: 16 }}>＋メッセージ バックアップビューアー</strong>
+        {summary && (
           <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>
+            会話 {summary.threads.length} 件
+          </span>
+        )}
+        {debugEnabled && bytes && fileName && (
+          <span style={{ color: 'var(--text-muted)', fontSize: 12, fontFamily: 'var(--mono)' }}>
             {fileName} ({bytes.byteLength.toLocaleString()} B)
           </span>
         )}
-        <span style={{ marginLeft: 'auto' }}>
+        <span style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
+          {bytes && (
+            <button
+              onClick={handleReset}
+              style={{
+                padding: '6px 12px',
+                borderRadius: 6,
+                border: '1px solid var(--border)',
+                background: 'var(--bg)',
+                color: 'var(--text)',
+              }}
+            >
+              別のファイルを開く
+            </button>
+          )}
           <DarkModeToggle />
         </span>
       </header>
 
       <main style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: 20, gap: 16 }}>
         {!bytes ? (
-          <>
-            <PrivacyBanner />
-            <FilePicker onFile={(file, buffer) => handleFile(file, buffer)} />
-          </>
+          <WelcomeScreen onFile={handleFile} />
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12, minHeight: 0, flex: 1 }}>
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-              <button onClick={handleReset}>別のファイルを読み込む</button>
-              <label style={{ fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                <input
-                  type="checkbox"
-                  checked={showDebug}
-                  onChange={(e) => setShowDebug(e.target.checked)}
-                />
-                デバッグビュー (TLV + hex)
-              </label>
+            <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+              {debugEnabled && (
+                <label
+                  style={{
+                    fontSize: 12,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 4,
+                    color: 'var(--text-muted)',
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={showDebug}
+                    onChange={(e) => setShowDebug(e.target.checked)}
+                  />
+                  開発者ビュー (TLV + hex)
+                </label>
+              )}
               {!showDebug && summary && (
                 <SortControls value={threadSort} onChange={setThreadSort} />
               )}
-              {parseInFlight && <ProgressIndicator progress={progress} />}
+              {parseInFlight && (
+                <ProgressIndicator progress={progress} debug={debugEnabled} />
+              )}
               {parseError && (
-                <span style={{ color: 'var(--danger, #c33)', fontSize: 12 }}>
-                  parse error: {parseError}
+                <span style={{ color: 'var(--danger)', fontSize: 12 }}>
+                  読込失敗: {parseError}
                 </span>
               )}
             </div>
             <div
               style={{
                 display: 'grid',
-                gridTemplateColumns: '1fr 1fr',
+                gridTemplateColumns: showDebug ? '1fr 1fr' : '320px 1fr',
                 gap: 12,
                 minHeight: 0,
                 flex: 1,
@@ -158,11 +243,7 @@ export function App() {
                     />
                   ) : (
                     <PlaceholderBox
-                      message={
-                        parseError
-                          ? 'パース結果を表示できません。'
-                          : 'パース中…'
-                      }
+                      message={parseError ? 'パース結果を表示できません。' : 'パース中…'}
                     />
                   )}
                   <HexDump bytes={bytes} jumpToOffset={jumpOffset} />
@@ -170,27 +251,36 @@ export function App() {
               ) : summary ? (
                 <>
                   <ThreadList
-                    backup={summary}
+                    totalCount={summary.threads.length}
                     selectedId={selectedThreadId}
                     onSelect={setSelectedThreadId}
-                    threads={sortedThreads}
+                    threads={filteredThreads}
+                    resolveContact={resolveForThread}
                     sort={threadSort}
+                    searchQuery={searchQuery}
+                    onSearchChange={setSearchQuery}
                   />
                   <ThreadDetail
                     thread={selectedThread}
+                    contact={selectedContact}
                     client={client}
-                    onJumpToOffset={(off) => {
-                      setJumpOffset(off);
-                      setShowDebug(true);
-                    }}
+                    debug={debugEnabled}
+                    onJumpToOffset={
+                      debugEnabled
+                        ? (off) => {
+                            setJumpOffset(off);
+                            setShowDebug(true);
+                          }
+                        : undefined
+                    }
                   />
                 </>
               ) : (
                 <PlaceholderBox
                   message={
                     parseError
-                      ? 'パース結果を表示できません。デバッグビューで生バイトを確認できます。'
-                      : 'パース中…'
+                      ? '読込に失敗しました。別のファイルをお試しください。'
+                      : '読込中…'
                   }
                 />
               )}
@@ -209,17 +299,24 @@ export function App() {
           justifyContent: 'space-between',
         }}
       >
-        <span>🔒 ローカル処理</span>
+        <span>🔒 ブラウザ内のみで処理。ファイルは送信されません。</span>
         <span>v0.1.0</span>
       </footer>
     </div>
   );
 }
 
-function ProgressIndicator({ progress }: { progress: ParseProgress | null }) {
+function ProgressIndicator({
+  progress,
+  debug,
+}: {
+  progress: ParseProgress | null;
+  debug: boolean;
+}) {
   const value = progress?.progress ?? 0;
   const stage = progress?.stage ?? 'scan';
   const note = progress?.note;
+  const label = STAGE_LABEL[stage];
   return (
     <span
       style={{
@@ -230,10 +327,10 @@ function ProgressIndicator({ progress }: { progress: ParseProgress | null }) {
         color: 'var(--text-muted)',
       }}
     >
-      <progress value={value} max={1} style={{ width: 120 }} />
+      <progress value={value} max={1} style={{ width: 140 }} />
       <span>
-        {stage}
-        {note ? ` — ${note}` : ''} ({Math.round(value * 100)}%)
+        {label}
+        {debug && note ? ` — ${note}` : ''} ({Math.round(value * 100)}%)
       </span>
     </span>
   );
@@ -242,10 +339,10 @@ function ProgressIndicator({ progress }: { progress: ParseProgress | null }) {
 function sortThreads(threads: ThreadSummary[], sort: ThreadSort): ThreadSummary[] {
   if (sort === 'file-order') return threads;
   const copy = [...threads];
-  if (sort === 'body-size') {
+  if (sort === 'message-volume') {
     copy.sort((a, b) => b.bodyLength - a.bodyLength);
-  } else if (sort === 'string-count') {
-    copy.sort((a, b) => b.strings.length - a.strings.length);
+  } else if (sort === 'attachment-count') {
+    copy.sort((a, b) => b.attachments.length - a.attachments.length);
   }
   return copy;
 }
@@ -255,11 +352,14 @@ function PlaceholderBox({ message }: { message: string }) {
     <div
       style={{
         border: '1px solid var(--border)',
-        borderRadius: 6,
-        padding: 12,
+        borderRadius: 8,
+        padding: 16,
         background: 'var(--bg-elev)',
-        fontSize: 12,
+        fontSize: 13,
         color: 'var(--text-muted)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
       }}
     >
       {message}

@@ -1,9 +1,9 @@
-export type ThreadSort = 'file-order' | 'body-size' | 'string-count';
+export type ThreadSort = 'file-order' | 'message-volume' | 'attachment-count';
 
 const OPTIONS: { value: ThreadSort; label: string }[] = [
-  { value: 'file-order', label: 'ファイル順' },
-  { value: 'body-size', label: 'サイズ' },
-  { value: 'string-count', label: '文字列数' },
+  { value: 'file-order', label: '元の順序' },
+  { value: 'message-volume', label: 'やり取りが多い順' },
+  { value: 'attachment-count', label: '写真が多い順' },
 ];
 
 interface Props {
@@ -22,7 +22,7 @@ export function SortControls({ value, onChange }: Props) {
         color: 'var(--text-muted)',
       }}
     >
-      ソート:
+      並び替え:
       <select
         value={value}
         onChange={(e) => onChange(e.target.value as ThreadSort)}
@@ -45,3 +45,4 @@ export function SortControls({ value, onChange }: Props) {
     </label>
   );
 }
+

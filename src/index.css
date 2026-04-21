@@ -15,6 +15,7 @@
   --radius: 12px;
   --mono: ui-monospace, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
   --sans: system-ui, -apple-system, 'Segoe UI', 'Hiragino Sans', 'Yu Gothic UI', sans-serif;
+  --overlay: rgba(0, 0, 0, 0.75);
   color-scheme: light;
 }
 

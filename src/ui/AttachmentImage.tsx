@@ -6,7 +6,9 @@ import { getCachedBlobUrl, setCachedBlobUrl } from '../util/blobCache';
 interface Props {
   client: ParserClient;
   attachment: AttachmentRef;
+  debug?: boolean;
   onJumpToOffset?: ((offset: number) => void) | undefined;
+  onOpen?: ((url: string) => void) | undefined;
 }
 
 type State =
@@ -22,17 +24,32 @@ type State =
  * Resolved Blob URLs go through a shared LRU cache so scrolling back doesn't
  * re-fetch.
  */
-export function AttachmentImage({ client, attachment, onJumpToOffset }: Props) {
+export function AttachmentImage({
+  client,
+  attachment,
+  debug = false,
+  onJumpToOffset,
+  onOpen,
+}: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [state, setState] = useState<State>(() => {
     const cached = getCachedBlobUrl(attachment.sourceOffset, attachment.length);
     return cached ? { status: 'ready', url: cached } : { status: 'idle' };
   });
 
+  // Ref mirrors the latest status so the observer-installed effect can stay
+  // mounted once and check whether a load has already fired. Including
+  // `state.status` in the effect's dep array would re-run it on idle→loading,
+  // and its cleanup would flip `cancelled` to true before the in-flight
+  // resolveAttachment Promise resolves — silently suppressing the `ready`
+  // state update.
+  const statusRef = useRef(state.status);
+  statusRef.current = state.status;
+
   useEffect(() => {
-    if (state.status !== 'idle') return;
     const el = containerRef.current;
     if (!el) return;
+    if (statusRef.current !== 'idle') return;
 
     let cancelled = false;
 
@@ -47,9 +64,6 @@ export function AttachmentImage({ client, attachment, onJumpToOffset }: Props) {
         .resolveAttachment(attachment)
         .then((bytes) => {
           if (cancelled) return;
-          // Worker-transferred bytes always have a plain ArrayBuffer backing,
-          // but structured-clone widens the type to ArrayBufferLike. The Blob
-          // constructor only accepts ArrayBuffer — cast to bridge the gap.
           const blob = new Blob([bytes as BlobPart], { type: attachment.contentType });
           const url = URL.createObjectURL(blob);
           setCachedBlobUrl(attachment.sourceOffset, attachment.length, url);
@@ -76,9 +90,10 @@ export function AttachmentImage({ client, attachment, onJumpToOffset }: Props) {
       cancelled = true;
       observer.disconnect();
     };
-  }, [client, attachment, state.status]);
+  }, [client, attachment]);
 
-  const sizeKb = (attachment.length / 1024).toFixed(1);
+  const ready = state.status === 'ready';
+  const canOpen = ready && onOpen;
   const offsetLabel = `0x${attachment.sourceOffset.toString(16)}`;
 
   return (
@@ -86,26 +101,36 @@ export function AttachmentImage({ client, attachment, onJumpToOffset }: Props) {
       ref={containerRef}
       style={{
         border: '1px solid var(--border)',
-        borderRadius: 6,
+        borderRadius: 8,
         background: 'var(--bg-sunken)',
         overflow: 'hidden',
         display: 'flex',
         flexDirection: 'column',
       }}
     >
-      <div
+      <button
+        type="button"
+        disabled={!canOpen}
+        onClick={() => {
+          if (state.status === 'ready' && onOpen) onOpen(state.url);
+        }}
+        aria-label={ready ? '写真を拡大表示' : '写真の読み込みを待機中'}
         style={{
           aspectRatio: '1 / 1',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
           background: 'var(--bg)',
+          border: 'none',
+          padding: 0,
+          cursor: canOpen ? 'zoom-in' : 'default',
+          width: '100%',
         }}
       >
         {state.status === 'ready' ? (
           <img
             src={state.url}
-            alt={`attachment at ${offsetLabel}`}
+            alt="添付写真"
             style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
           />
         ) : state.status === 'error' ? (
@@ -117,37 +142,39 @@ export function AttachmentImage({ client, attachment, onJumpToOffset }: Props) {
             {state.status === 'loading' ? '読込中…' : 'スクロールで読込'}
           </span>
         )}
-      </div>
-      <div
-        style={{
-          padding: '4px 8px',
-          fontSize: 11,
-          color: 'var(--text-muted)',
-          display: 'flex',
-          gap: 6,
-          alignItems: 'center',
-          fontFamily: 'var(--mono)',
-          borderTop: '1px solid var(--border)',
-        }}
-      >
-        <span>{attachment.contentType}</span>
-        <span>·</span>
-        <span>{sizeKb} KB</span>
-        <span style={{ marginLeft: 'auto' }}>
-          {onJumpToOffset ? (
-            <button
-              type="button"
-              onClick={() => onJumpToOffset(attachment.sourceOffset)}
-              style={{ fontSize: 11, padding: '1px 6px' }}
-              title={`jump hex to ${offsetLabel}`}
-            >
-              {offsetLabel}
-            </button>
-          ) : (
-            <span>{offsetLabel}</span>
-          )}
-        </span>
-      </div>
+      </button>
+      {debug && (
+        <div
+          style={{
+            padding: '4px 8px',
+            fontSize: 11,
+            color: 'var(--text-muted)',
+            display: 'flex',
+            gap: 6,
+            alignItems: 'center',
+            fontFamily: 'var(--mono)',
+            borderTop: '1px solid var(--border)',
+          }}
+        >
+          <span>{attachment.contentType}</span>
+          <span>·</span>
+          <span>{(attachment.length / 1024).toFixed(1)} KB</span>
+          <span style={{ marginLeft: 'auto' }}>
+            {onJumpToOffset ? (
+              <button
+                type="button"
+                onClick={() => onJumpToOffset(attachment.sourceOffset)}
+                style={{ fontSize: 11, padding: '1px 6px' }}
+                title={`jump hex to ${offsetLabel}`}
+              >
+                {offsetLabel}
+              </button>
+            ) : (
+              <span>{offsetLabel}</span>
+            )}
+          </span>
+        </div>
+      )}
     </div>
   );
 }
