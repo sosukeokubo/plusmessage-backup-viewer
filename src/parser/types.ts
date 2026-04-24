@@ -79,6 +79,42 @@ export interface Message {
   raw: RawChunk;
 }
 
+/**
+ * A single message record reconstructed from the SMS inbox store (section
+ * type 0x0001). Layout — verified against the real 62MB backup:
+ *
+ *   [20B anchor: 07000000 01000000 00000000 05000000 00000000]
+ *   [u64 LE: timestamp ms]
+ *   [u32 LE: textLen][text bytes]
+ *   [u32 LE: mimeLen][mime string, e.g. "text/plain;charset=utf-8"]
+ *   [u32 LE: uuidLen][uuid string]
+ *   [u32 LE: sipLen][sip metadata string]
+ *   [40B trailer including a repeat of the timestamp]
+ *
+ * Direction can't be recovered from this backup — every SIP From/To is
+ * `<sip:anonymous@anonymous.invalid>` and the pipe-delimited flags are
+ * constant `1|1|0|`. We default to 'unknown' and let the UI treat the whole
+ * list as received messages for now.
+ */
+export interface InboxMessage {
+  id: string;
+  peerPhone: string;
+  text: string;
+  mimeType: string;
+  timestamp: { ms: number; iso: string };
+  direction: 'incoming' | 'outgoing' | 'unknown';
+  sipMetadata: string;
+  offset: number;
+  length: number;
+}
+
+export interface InboxBucket {
+  peerPhone: string;
+  messages: InboxMessage[];
+  offset: number;
+  length: number;
+}
+
 export interface Thread {
   id: string;
   threadId: number;
@@ -109,6 +145,7 @@ export interface Backup {
   meta?: Meta;
   contacts: Contact[];
   settings?: RawChunk;
+  inbox?: InboxBucket[];
   threads: Thread[];
   sections: RawChunk[];
   unknownSections: RawChunk[];
@@ -170,6 +207,7 @@ export interface BackupSummary {
   meta?: MetaSummary;
   contacts: ContactSummary[];
   settings?: RawChunkSummary;
+  inbox?: InboxBucket[];
   threads: ThreadSummary[];
   sections: RawChunkSummary[];
   unknownSections: RawChunkSummary[];

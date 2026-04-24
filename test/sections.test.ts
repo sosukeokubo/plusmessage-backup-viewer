@@ -173,20 +173,20 @@ describe('parseBackup — THREAD', () => {
     expect(backup.threads[1]?.headerSizeField).toBe(42);
   });
 
-  it('extracts printable strings ≥ 6 chars from the thread body', () => {
+  it('extracts printable strings ≥ 8 chars from the thread body', () => {
     const body = concat(
       new Uint8Array([0x00, 0x01, 0x02]),
-      ascii('short'), // 5 chars, skipped
+      ascii('short7!'), // 7 chars, skipped
       new Uint8Array([0xff]),
-      ascii('ABCDEF'), // 6 chars, kept
+      ascii('ABCDEFGH'), // 8 chars, kept
       new Uint8Array([0x00, 0x00]),
       ascii('uuid-1234'), // 9 chars, kept
     );
     const messages = tlv(SECTION_MESSAGES, concat(u32le(1), threadRecord(7, 0x01, 0, body)));
     const backup = parseBackup(buildMinimalBackup([messages]));
     const strings = backup.threads[0]?.strings ?? [];
-    expect(strings.map((s) => s.text)).toEqual(['ABCDEF', 'uuid-1234']);
-    expect(strings[0]?.length).toBe(6);
+    expect(strings.map((s) => s.text)).toEqual(['ABCDEFGH', 'uuid-1234']);
+    expect(strings[0]?.length).toBe(8);
   });
 
   it('emits progress events for each thread with monotonic progress', () => {

@@ -1,6 +1,6 @@
 import { useRef } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import type { ThreadSummary } from '../parser/types';
+import type { InboxMessage, ThreadSummary } from '../parser/types';
 import type { ResolvedContact } from '../util/contactResolver';
 import { filterMessageStrings } from '../util/stringFilter';
 import { Avatar } from './Avatar';
@@ -18,6 +18,7 @@ interface Props {
   onSelect: (id: string) => void;
   threads: ThreadSummary[];
   resolveContact: (thread: ThreadSummary) => ResolvedContact;
+  inboxFor: (thread: ThreadSummary) => readonly InboxMessage[] | undefined;
   sort: ThreadSort;
   searchQuery: string;
   onSearchChange: (q: string) => void;
@@ -31,6 +32,7 @@ export function ThreadList({
   onSelect,
   threads,
   resolveContact,
+  inboxFor,
   sort,
   searchQuery,
   onSearchChange,
@@ -136,6 +138,7 @@ export function ThreadList({
                   <ThreadRow
                     thread={t}
                     contact={contact}
+                    inbox={inboxFor(t)}
                     selected={t.id === selectedId}
                     onClick={() => onSelect(t.id)}
                   />
@@ -152,16 +155,24 @@ export function ThreadList({
 function ThreadRow({
   thread,
   contact,
+  inbox,
   selected,
   onClick,
 }: {
   thread: ThreadSummary;
   contact: ResolvedContact;
+  inbox?: readonly InboxMessage[] | undefined;
   selected: boolean;
   onClick: () => void;
 }) {
   const messageTexts = filterMessageStrings(thread.strings);
-  const preview = messageTexts.at(-1)?.text ?? '';
+  const inboxCount = inbox?.length ?? 0;
+  const latestInboxText = inbox && inbox.length > 0
+    ? inbox.reduce((latest, m) =>
+        m.timestamp.ms > latest.timestamp.ms ? m : latest,
+      ).text
+    : '';
+  const preview = latestInboxText.trim() || messageTexts.at(-1)?.text || '';
   const photoCount = thread.attachments.length;
   const textCount = messageTexts.length;
   const rawStringCount = thread.strings.length;
@@ -224,9 +235,13 @@ function ThreadRow({
           {contact.displayName}
         </span>
         <span style={{ fontSize: 11, color: 'var(--text-muted)', flexShrink: 0 }}>
-          {photoCount > 0 ? `写真${photoCount}` : ''}
-          {photoCount > 0 && textCount > 0 ? ' · ' : ''}
-          {textCount > 0 ? `テキスト${textCount}` : ''}
+          {[
+            inboxCount > 0 ? `メッセージ${inboxCount}` : '',
+            photoCount > 0 ? `写真${photoCount}` : '',
+            textCount > 0 ? `断片${textCount}` : '',
+          ]
+            .filter(Boolean)
+            .join(' · ')}
         </span>
       </span>
       <span

@@ -19,11 +19,14 @@ import {
 } from './constants';
 import { iterateTlvs, readTlv } from './tlv';
 import { scanAttachments } from './attachments';
+import { parseInbox } from './inbox';
+import { extractTextRuns } from './textRuns';
 import type {
   Backup,
   BackupSummary,
   Contact,
   ContactSummary,
+  InboxBucket,
   KeyValueItem,
   KeyValueItemSummary,
   Meta,
@@ -32,7 +35,6 @@ import type {
   RawChunk,
   RawChunkSummary,
   Thread,
-  ThreadString,
   ThreadSummary,
   TlvRecord,
 } from './types';
@@ -239,7 +241,13 @@ function parseThread(rec: TlvRecord): Thread {
     unknownFields: [],
     raw: toRawChunk(rec),
     body,
-    strings: extractPrintableStrings(body, bodyAbsoluteOffset),
+    // Min 6 codepoints mirrors the previous ASCII-only guard; 500 is plenty
+    // for a single thread while keeping the summary payload bounded.
+    // Raised above the plain-UTF-8 validation minimum so short runs of random
+    // binary that happen to decode (e.g. one stray kanji plus ASCII symbols)
+    // don't flood the "取り出せたテキスト断片" list. The real message bodies
+    // come from the structured inbox parser.
+    strings: extractTextRuns(body, bodyAbsoluteOffset, { minCodepoints: 8, maxRuns: 500 }),
     attachments: scanAttachments(body, bodyAbsoluteOffset),
     headerFlag: flag,
     headerSizeField: sizeField,
@@ -273,47 +281,6 @@ function parseMessages(
   return out;
 }
 
-/**
- * Scan `body` for runs of printable ASCII (≥6 chars) to surface UUIDs, URLs,
- * and MIME types hiding inside the otherwise-opaque thread payload. This is a
- * lightweight debugging aid, not a parser.
- */
-function extractPrintableStrings(body: Uint8Array, baseOffset: number): ThreadString[] {
-  const out: ThreadString[] = [];
-  const MIN_LEN = 6;
-  const MAX_STRINGS = 200;
-  let runStart = -1;
-  for (let i = 0; i < body.length; i += 1) {
-    const b = body[i]!;
-    const printable = b >= 0x20 && b <= 0x7e;
-    if (printable) {
-      if (runStart < 0) runStart = i;
-    } else if (runStart >= 0) {
-      const len = i - runStart;
-      if (len >= MIN_LEN) {
-        out.push({
-          offset: baseOffset + runStart,
-          length: len,
-          text: utf8.decode(body.subarray(runStart, i)),
-        });
-        if (out.length >= MAX_STRINGS) return out;
-      }
-      runStart = -1;
-    }
-  }
-  if (runStart >= 0) {
-    const len = body.length - runStart;
-    if (len >= MIN_LEN) {
-      out.push({
-        offset: baseOffset + runStart,
-        length: len,
-        text: utf8.decode(body.subarray(runStart)),
-      });
-    }
-  }
-  return out;
-}
-
 export function parseBackup(
   buffer: Uint8Array,
   onProgress?: (p: ParseProgress) => void,
@@ -335,6 +302,7 @@ export function parseBackup(
   let meta: Meta | undefined;
   const contacts: Contact[] = [];
   let settings: RawChunk | undefined;
+  let inbox: InboxBucket[] | undefined;
   const threads: Thread[] = [];
 
   onProgress?.({ stage: 'scan', progress: 0.05, note: 'header' });
@@ -352,6 +320,14 @@ export function parseBackup(
         break;
       case SECTION_SETTINGS:
         settings = toRawChunk(rec);
+        // SETTINGS is misnamed historically — the 0x0001 section actually
+        // carries the SMS inbox store (per-peer message bodies, timestamps,
+        // SIP metadata). Parse it structurally so the UI can show real text.
+        try {
+          inbox = parseInbox(rec);
+        } catch {
+          inbox = [];
+        }
         break;
       case SECTION_MESSAGES:
         onProgress?.({ stage: 'threads', progress: 0.3 });
@@ -377,6 +353,7 @@ export function parseBackup(
   };
   if (meta) backup.meta = meta;
   if (settings) backup.settings = settings;
+  if (inbox) backup.inbox = inbox;
   onProgress?.({ stage: 'done', progress: 1 });
   return backup;
 }
@@ -450,5 +427,6 @@ export function summarizeBackup(backup: Backup): BackupSummary {
   };
   if (backup.meta) summary.meta = summarizeMeta(backup.meta);
   if (backup.settings) summary.settings = summarizeChunk(backup.settings);
+  if (backup.inbox) summary.inbox = backup.inbox;
   return summary;
 }

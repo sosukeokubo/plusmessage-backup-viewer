@@ -11,9 +11,11 @@ import { ParserClient } from './worker/parserClient';
 import { clearBlobCache } from './util/blobCache';
 import {
   buildContactIndex,
+  normalizePhone,
   resolveThreadContact,
   type ResolvedContact,
 } from './util/contactResolver';
+import { buildInboxIndex, composeThreadList } from './util/inboxIndex';
 
 const STAGE_LABEL: Record<ParseProgress['stage'], string> = {
   scan: 'バックアップを確認中…',
@@ -102,25 +104,40 @@ export function App() {
     return buildContactIndex(summary.contacts);
   }, [summary]);
 
-  // Stable index per thread based on its position in the original file. Used
+  const inboxIndex = useMemo(() => buildInboxIndex(summary?.inbox), [summary]);
+
+  const composedThreads = useMemo(() => {
+    if (!summary) return [];
+    return composeThreadList(summary.threads, summary.inbox);
+  }, [summary]);
+
+  // Stable index per thread based on its position in the composed list. Used
   // so fallback labels like "会話 5" stay the same regardless of current sort
   // or filter — otherwise a user searching "会話 5" would see the 5th result
   // rename itself to "会話 1".
   const threadFileIndex = useMemo(() => {
     const map = new Map<string, number>();
-    if (summary) summary.threads.forEach((t, i) => map.set(t.id, i));
+    composedThreads.forEach((t, i) => map.set(t.id, i));
     return map;
-  }, [summary]);
+  }, [composedThreads]);
 
   const sortedThreads = useMemo(() => {
-    if (!summary) return [];
-    return sortThreads(summary.threads, threadSort);
-  }, [summary, threadSort]);
+    return sortThreads(composedThreads, threadSort);
+  }, [composedThreads, threadSort]);
 
   const resolveForThread = useCallback(
     (thread: ThreadSummary): ResolvedContact =>
       resolveThreadContact(thread, contactIndex, threadFileIndex.get(thread.id) ?? 0),
     [contactIndex, threadFileIndex],
+  );
+
+  const inboxForThread = useCallback(
+    (thread: ThreadSummary) => {
+      if (!thread.peerPhone) return undefined;
+      const key = normalizePhone(thread.peerPhone);
+      return key ? inboxIndex.get(key) : undefined;
+    },
+    [inboxIndex],
   );
 
   const filteredThreads = useMemo(() => {
@@ -134,14 +151,19 @@ export function App() {
   }, [sortedThreads, searchQuery, resolveForThread]);
 
   const selectedThread = useMemo(() => {
-    if (!summary) return undefined;
-    return summary.threads.find((t) => t.id === selectedThreadId);
-  }, [summary, selectedThreadId]);
+    return composedThreads.find((t) => t.id === selectedThreadId);
+  }, [composedThreads, selectedThreadId]);
 
   const selectedContact = useMemo((): ResolvedContact | undefined => {
     if (!selectedThread) return undefined;
     return resolveForThread(selectedThread);
   }, [selectedThread, resolveForThread]);
+
+  const selectedInboxMessages = useMemo(() => {
+    if (!selectedThread?.peerPhone) return undefined;
+    const key = normalizePhone(selectedThread.peerPhone);
+    return key ? inboxIndex.get(key) : undefined;
+  }, [selectedThread, inboxIndex]);
 
   const parseInFlight = bytes !== null && summary === null && parseError === null;
 
@@ -161,7 +183,7 @@ export function App() {
         <strong style={{ fontSize: 16 }}>＋メッセージ バックアップビューアー</strong>
         {summary && (
           <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>
-            会話 {summary.threads.length} 件
+            会話 {composedThreads.length} 件
           </span>
         )}
         {debugEnabled && bytes && fileName && (
@@ -251,11 +273,12 @@ export function App() {
               ) : summary ? (
                 <>
                   <ThreadList
-                    totalCount={summary.threads.length}
+                    totalCount={composedThreads.length}
                     selectedId={selectedThreadId}
                     onSelect={setSelectedThreadId}
                     threads={filteredThreads}
                     resolveContact={resolveForThread}
+                    inboxFor={inboxForThread}
                     sort={threadSort}
                     searchQuery={searchQuery}
                     onSearchChange={setSearchQuery}
@@ -264,6 +287,7 @@ export function App() {
                     thread={selectedThread}
                     contact={selectedContact}
                     client={client}
+                    inboxMessages={selectedInboxMessages}
                     debug={debugEnabled}
                     onJumpToOffset={
                       debugEnabled

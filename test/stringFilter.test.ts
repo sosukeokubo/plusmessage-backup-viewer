@@ -57,6 +57,29 @@ describe('isLikelyMessageText', () => {
   it('passes short ASCII identifiers lacking whitespace', () => {
     expect(isLikelyMessageText('OK')).toBe(false);
   });
+
+  it('rejects stray-Japanese-byte binary noise runs', () => {
+    // These are the garbage runs that showed up in the thread-body scanner:
+    // one random kanji decoded out of binary bytes, surrounded by ASCII
+    // punctuation that never appears in real messages.
+    expect(isLikelyMessageText('\\[瑩jdAa')).toBe(false);
+    expect(isLikelyMessageText('D<呈VE2')).toBe(false);
+    expect(isLikelyMessageText('謎\\+U2J')).toBe(false);
+    expect(isLikelyMessageText('J胭 <!2')).toBe(false);
+    expect(isLikelyMessageText('YdzXo麦')).toBe(false);
+    expect(isLikelyMessageText('?cVt亢T')).toBe(false);
+    // Scattered single JP codepoints between ASCII: must require contiguous
+    // Japanese runs or we drown in this kind of noise.
+    expect(isLikelyMessageText('b,.鵰k.槊ĸ')).toBe(false);
+    expect(isLikelyMessageText('-Ay-d7r戮')).toBe(false);
+    expect(isLikelyMessageText('裾F*餔Vj籬jT熒n')).toBe(false);
+  });
+
+  it('still accepts legitimate mixed Japanese/ASCII messages', () => {
+    expect(isLikelyMessageText('明日 9時 集合')).toBe(true);
+    expect(isLikelyMessageText('OK、明日よろしく')).toBe(true);
+    expect(isLikelyMessageText('Thanks 助かります')).toBe(true);
+  });
 });
 
 describe('filterMessageStrings', () => {
