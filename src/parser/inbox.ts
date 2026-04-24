@@ -10,7 +10,7 @@ const utf8 = new TextDecoder('utf-8', { fatal: false });
  * variable peer-bucket framing — the anchor is unambiguous and gives exact
  * message offsets.
  */
-const MESSAGE_ANCHOR = new Uint8Array([
+export const MESSAGE_ANCHOR = new Uint8Array([
   0x07, 0x00, 0x00, 0x00,
   0x01, 0x00, 0x00, 0x00,
   0x00, 0x00, 0x00, 0x00,
@@ -137,7 +137,7 @@ function readMessage(
   }
 }
 
-function findAllAnchors(content: Uint8Array): number[] {
+export function findAllAnchors(content: Uint8Array): number[] {
   const hits: number[] = [];
   let from = 0;
   while (from <= content.length - MESSAGE_ANCHOR.length) {
@@ -149,7 +149,7 @@ function findAllAnchors(content: Uint8Array): number[] {
   return hits;
 }
 
-interface PhoneMarker {
+export interface PhoneMarker {
   offset: number;
   phone: string;
 }
@@ -160,7 +160,7 @@ interface PhoneMarker {
  * Several copies appear per bucket (once as the peer identity, several inside
  * the contact blob). We keep them all and later resolve by nearest-preceding.
  */
-function findAllPeerPhones(content: Uint8Array): PhoneMarker[] {
+export function findAllPeerPhones(content: Uint8Array): PhoneMarker[] {
   const out: PhoneMarker[] = [];
   const n = content.length;
   let i = 0;
