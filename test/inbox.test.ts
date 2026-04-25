@@ -27,11 +27,18 @@ function concat(...parts: Uint8Array[]): Uint8Array {
   return out;
 }
 
-const MESSAGE_ANCHOR = new Uint8Array([
+const ANCHOR_INCOMING = new Uint8Array([
   0x07, 0x00, 0x00, 0x00,
   0x01, 0x00, 0x00, 0x00,
   0x00, 0x00, 0x00, 0x00,
   0x05, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00,
+]);
+const ANCHOR_OUTGOING = new Uint8Array([
+  0x06, 0x00, 0x00, 0x00,
+  0x01, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00,
+  0x04, 0x00, 0x00, 0x00,
   0x00, 0x00, 0x00, 0x00,
 ]);
 
@@ -46,9 +53,11 @@ function buildMessage(params: {
   mime: string;
   uuid: string;
   sip: string;
+  direction?: 'incoming' | 'outgoing';
 }): Uint8Array {
+  const anchor = params.direction === 'outgoing' ? ANCHOR_OUTGOING : ANCHOR_INCOMING;
   return concat(
-    MESSAGE_ANCHOR,
+    anchor,
     u64LE(params.tsMs),
     lengthPrefixed(params.text),
     lengthPrefixed(params.mime),
@@ -115,7 +124,7 @@ describe('parseInbox', () => {
     expect(m?.id).toBe('11111111-2222-3333-4444-555555555555');
     expect(m?.timestamp.ms).toBe(Number(ts));
     expect(m?.timestamp.iso).toBe(new Date(Number(ts)).toISOString());
-    expect(m?.direction).toBe('unknown');
+    expect(m?.direction).toBe('incoming');
     expect(m?.peerPhone).toBe('+818012345678');
   });
 
@@ -207,6 +216,54 @@ describe('parseInbox', () => {
     const buckets = parseInbox(rec);
     expect(buckets).toHaveLength(1);
     expect(buckets[0]?.messages[0]?.text).toBe('プレフィックスなし');
+  });
+
+  it('tags outgoing-anchor records with direction=outgoing', () => {
+    // Real backup observation (docs/findings-2026-04-26.md): sent +messages
+    // use anchor 06…04 and mime "text/plain" instead of "text/plain;charset=utf-8".
+    const sent = buildMessage({
+      tsMs: 1741000000000n,
+      text: 'すてきな1年になりますように',
+      mime: 'text/plain',
+      uuid: 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee',
+      sip: '|sent|',
+      direction: 'outgoing',
+    });
+    const bucket = buildBucket('+819012340001', [sent]);
+    const rec = buildInboxRecord([bucket]);
+
+    const [parsed] = parseInbox(rec);
+    expect(parsed?.messages).toHaveLength(1);
+    expect(parsed?.messages[0]?.direction).toBe('outgoing');
+    expect(parsed?.messages[0]?.text).toBe('すてきな1年になりますように');
+    expect(parsed?.messages[0]?.mimeType).toBe('text/plain');
+  });
+
+  it('parses mixed incoming and outgoing records in one bucket, ordered by offset', () => {
+    const incoming = buildMessage({
+      tsMs: 1700000000000n,
+      text: 'received',
+      mime: 'text/plain;charset=utf-8',
+      uuid: '11111111-1111-1111-1111-111111111111',
+      sip: '|in|',
+      direction: 'incoming',
+    });
+    const outgoing = buildMessage({
+      tsMs: 1700000060000n,
+      text: 'sent',
+      mime: 'text/plain',
+      uuid: '22222222-2222-2222-2222-222222222222',
+      sip: '|out|',
+      direction: 'outgoing',
+    });
+    const bucket = buildBucket('+818099999999', [incoming, outgoing]);
+    const rec = buildInboxRecord([bucket]);
+
+    const [parsed] = parseInbox(rec);
+    expect(parsed?.messages.map((m) => [m.text, m.direction])).toEqual([
+      ['received', 'incoming'],
+      ['sent', 'outgoing'],
+    ]);
   });
 
   it('returns [] for records without a bucket count', () => {

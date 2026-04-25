@@ -16,9 +16,10 @@ import {
   SECTION_SETTINGS,
 } from '../src/parser';
 import {
+  ANCHOR_INCOMING,
+  ANCHOR_OUTGOING,
   findAllAnchors,
   findAllPeerPhones,
-  MESSAGE_ANCHOR,
 } from '../src/parser/inbox';
 
 const SECTION_NAMES: Record<number, string> = {
@@ -53,7 +54,8 @@ function main(): void {
   console.log(`## File`);
   console.log(`path:         ${abs}`);
   console.log(`fileSize:     ${buf.byteLength} bytes (${(buf.byteLength / 1024 / 1024).toFixed(2)} MiB)`);
-  console.log(`anchor hex:   ${Array.from(MESSAGE_ANCHOR).map((b) => b.toString(16).padStart(2, '0')).join(' ')}`);
+  console.log(`anchor IN:    ${Array.from(ANCHOR_INCOMING).map((b) => b.toString(16).padStart(2, '0')).join(' ')}`);
+  console.log(`anchor OUT:   ${Array.from(ANCHOR_OUTGOING).map((b) => b.toString(16).padStart(2, '0')).join(' ')}`);
   console.log('');
 
   const t0 = Date.now();
@@ -106,9 +108,13 @@ function main(): void {
     const content = s.bytes.subarray(TLV_HEADER_SIZE);
 
     const anchors = findAllAnchors(content);
-    console.log(`  MESSAGE_ANCHOR hits:     ${anchors.length}`);
+    const incomingCount = anchors.filter((a) => a.direction === 'incoming').length;
+    const outgoingCount = anchors.filter((a) => a.direction === 'outgoing').length;
+    console.log(`  anchor hits total:       ${anchors.length}  (in=${incomingCount}, out=${outgoingCount})`);
     if (anchors.length > 0) {
-      const sample = anchors.slice(0, 5).map((o) => `0x${o.toString(16)}`).join(', ');
+      const sample = anchors.slice(0, 5)
+        .map((a) => `${a.direction === 'incoming' ? 'IN ' : 'OUT'} 0x${a.offset.toString(16)}`)
+        .join(', ');
       console.log(`  first 5 anchor offsets:  ${sample}`);
     }
 
@@ -130,8 +136,16 @@ function main(): void {
   console.log(`## parseInbox result`);
   const inbox = backup.inbox ?? [];
   const totalMessages = inbox.reduce((acc, b) => acc + b.messages.length, 0);
+  const incomingTotal = inbox.reduce(
+    (acc, b) => acc + b.messages.filter((m) => m.direction === 'incoming').length,
+    0,
+  );
+  const outgoingTotal = inbox.reduce(
+    (acc, b) => acc + b.messages.filter((m) => m.direction === 'outgoing').length,
+    0,
+  );
   console.log(`  buckets:        ${inbox.length}`);
-  console.log(`  messages total: ${totalMessages}`);
+  console.log(`  messages total: ${totalMessages}  (in=${incomingTotal}, out=${outgoingTotal})`);
   if (inbox.length > 0) {
     const sorted = [...inbox].sort((a, b) => b.messages.length - a.messages.length);
     console.log(`  buckets (sorted by messages desc):`);
@@ -142,7 +156,10 @@ function main(): void {
       const firstIso = first?.timestamp.iso ?? '';
       const firstText = first ? truncate(first.text.replace(/\n/g, '⏎'), 40) : '';
       const mime = first?.mimeType ?? '';
-      console.log(`    [${i}] phone=${phone.padEnd(16)} msgs=${b.messages.length.toString().padStart(3)} first=${firstIso.slice(0, 19)}  mime=${mime}`);
+      const inCount = b.messages.filter((m) => m.direction === 'incoming').length;
+      const outCount = b.messages.filter((m) => m.direction === 'outgoing').length;
+      const dirLabel = `in=${inCount.toString().padStart(2)} out=${outCount.toString().padStart(2)}`;
+      console.log(`    [${i}] phone=${phone.padEnd(16)} msgs=${b.messages.length.toString().padStart(3)} ${dirLabel} first=${firstIso.slice(0, 19)}  mime=${mime}`);
       if (firstText) {
         console.log(`         text: ${firstText}`);
       }

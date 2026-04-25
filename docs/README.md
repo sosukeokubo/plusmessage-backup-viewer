@@ -8,14 +8,18 @@
 
 - [file-format.md](./file-format.md) — バックアップファイル全体の構造
   （プリアンブル、TLV セクション、エンドセンチネル）
-- [section-0x0001-inbox.md](./section-0x0001-inbox.md) — 最大の謎である
-  「SETTINGS」セクション（実体は SMS 受信箱ストア）の詳細解析
+- [section-0x0001-inbox.md](./section-0x0001-inbox.md) — 「SETTINGS」セクション
+  (実体は SMS と +メッセージの送受信を統合した本文ストア) の詳細解析
 - [text-restoration.md](./text-restoration.md) — 本文復元のために試した手法と、
   何が機能して何が機能しなかったかの記録
 - [open-questions.md](./open-questions.md) — 未解決の疑問と、次に調べるべき
   箇所のチェックリスト
 - [findings-2026-04-25.md](./findings-2026-04-25.md) — 実 62MB ファイルでの
   検証結果ログ（SMS 復元 17 バケット 61 通の確認、UI 配線の検証）
+- [findings-2026-04-26.md](./findings-2026-04-26.md) — +メッセージ本文の
+  格納場所を特定（SETTINGS 内に送信アンカー `06…04` で格納されていた）。
+  parseInbox を 2 アンカー対応に改修し、`InboxBubble` を direction 別の
+  左右レイアウトに変更してブラウザでも確認した
 
 ## 検証スクリプト
 
@@ -24,6 +28,11 @@
 - `pnpm tsx scripts/analyze.ts ./PlusMessage.backup` — パーサ全体の動作確認
 - `pnpm tsx scripts/ui-probe.ts ./PlusMessage.backup` — UI 配線
   (sidebar + detail) のシミュレーション
+- `pnpm tsx scripts/grep-bytes.ts ./PlusMessage.backup --utf8 "<phrase>"`
+  — 任意の UTF-8 文字列 / 16 進バイト列をファイル全域から検索し、
+  ヒット箇所をセクション情報付きで hexdump 表示
+- `pnpm tsx scripts/scan-zlib.ts ./PlusMessage.backup` — 全 thread body の
+  zlib stream を列挙し、attachment 既知範囲外を hexdump でプレビュー
 
 ## 前提知識
 

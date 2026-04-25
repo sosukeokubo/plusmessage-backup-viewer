@@ -330,20 +330,22 @@ function InboxBubble({ message }: { message: InboxMessage }) {
   const stamp = formatInboxTimestamp(message.timestamp.ms);
   const body = message.text.trim();
   const hasText = body.length > 0;
+  const isOutgoing = message.direction === 'outgoing';
   return (
     <div
       style={{
         display: 'flex',
         flexDirection: 'column',
-        alignItems: 'flex-start',
+        alignItems: isOutgoing ? 'flex-end' : 'flex-start',
+        alignSelf: isOutgoing ? 'flex-end' : 'flex-start',
         maxWidth: '80%',
       }}
     >
       <div
         style={{
-          background: 'var(--accent-weak)',
-          color: 'var(--text)',
-          border: '1px solid var(--border)',
+          background: isOutgoing ? 'var(--accent)' : 'var(--accent-weak)',
+          color: isOutgoing ? 'var(--accent-contrast, #fff)' : 'var(--text)',
+          border: isOutgoing ? '1px solid var(--accent)' : '1px solid var(--border)',
           borderRadius: 12,
           padding: '8px 12px',
           fontSize: 14,
@@ -355,7 +357,15 @@ function InboxBubble({ message }: { message: InboxMessage }) {
         {hasText ? body : <span style={{ color: 'var(--text-muted)' }}>（本文なし）</span>}
       </div>
       {stamp && (
-        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2, paddingLeft: 4 }}>
+        <div
+          style={{
+            fontSize: 11,
+            color: 'var(--text-muted)',
+            marginTop: 2,
+            paddingLeft: isOutgoing ? 0 : 4,
+            paddingRight: isOutgoing ? 4 : 0,
+          }}
+        >
           {stamp}
         </div>
       )}

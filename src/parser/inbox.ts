@@ -5,18 +5,40 @@ import type { InboxBucket, InboxMessage, TlvRecord } from './types';
 const utf8 = new TextDecoder('utf-8', { fatal: false });
 
 /**
- * 20-byte pattern that precedes every inbox message record. Five little-endian
- * u32s: 7, 1, 0, 5, 0. We anchor on this rather than trying to understand the
- * variable peer-bucket framing — the anchor is unambiguous and gives exact
- * message offsets.
+ * 20-byte patterns that precede every message record. Five little-endian
+ * u32s. The first and fourth differ between incoming (received SMS or
+ * received +message) and outgoing (sent +message) records — confirmed by
+ * grep-bytes verification on the real 65MB backup against four known sent
+ * phrases (docs/findings-2026-04-26.md):
+ *
+ *   incoming: 7, 1, 0, 5, 0   →  mime=`text/plain;charset=utf-8`
+ *   outgoing: 6, 1, 0, 4, 0   →  mime=`text/plain`
+ *
+ * Anchoring on these patterns avoids the still-unparsed peer-bucket framing.
  */
-export const MESSAGE_ANCHOR = new Uint8Array([
+export const ANCHOR_INCOMING = new Uint8Array([
   0x07, 0x00, 0x00, 0x00,
   0x01, 0x00, 0x00, 0x00,
   0x00, 0x00, 0x00, 0x00,
   0x05, 0x00, 0x00, 0x00,
   0x00, 0x00, 0x00, 0x00,
 ]);
+
+export const ANCHOR_OUTGOING = new Uint8Array([
+  0x06, 0x00, 0x00, 0x00,
+  0x01, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00,
+  0x04, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00,
+]);
+
+/** Backwards-compatible alias — older call sites import MESSAGE_ANCHOR. */
+export const MESSAGE_ANCHOR = ANCHOR_INCOMING;
+
+export interface AnchorHit {
+  offset: number;
+  direction: 'incoming' | 'outgoing';
+}
 
 /**
  * Parse the SETTINGS-typed section as an SMS inbox store.
@@ -47,7 +69,7 @@ export function parseInbox(rec: TlvRecord): InboxBucket[] {
   const byPhone = new Map<string, Accum>();
 
   for (const anchor of anchors) {
-    const peerPhone = nearestPrecedingPhone(phones, anchor) ?? '';
+    const peerPhone = nearestPrecedingPhone(phones, anchor.offset) ?? '';
     const parsed = readMessage(content, anchor, peerPhone, baseOffset);
     if (!parsed) continue;
 
@@ -88,14 +110,14 @@ interface MessageParseResult {
 
 function readMessage(
   buf: Uint8Array,
-  anchorOffset: number,
+  anchor: AnchorHit,
   peerPhone: string,
   sectionBaseOffset: number,
 ): MessageParseResult | null {
-  const start = anchorOffset;
+  const start = anchor.offset;
   const r = new BinaryReader(buf, start, buf.length);
   try {
-    r.skip(MESSAGE_ANCHOR.length);
+    r.skip(ANCHOR_INCOMING.length);
     const tsMsBig = r.readI64LE();
     const tsMs = Number(tsMsBig);
     const textLen = r.readU32LE();
@@ -126,7 +148,7 @@ function readMessage(
       text,
       mimeType,
       timestamp: { ms: tsMs, iso },
-      direction: 'unknown',
+      direction: anchor.direction,
       sipMetadata: utf8.decode(sipBytes),
       offset: sectionBaseOffset + start,
       length: end - start,
@@ -137,14 +159,24 @@ function readMessage(
   }
 }
 
-export function findAllAnchors(content: Uint8Array): number[] {
+export function findAllAnchors(content: Uint8Array): AnchorHit[] {
+  const incoming = collectAnchorOffsets(content, ANCHOR_INCOMING).map(
+    (offset): AnchorHit => ({ offset, direction: 'incoming' }),
+  );
+  const outgoing = collectAnchorOffsets(content, ANCHOR_OUTGOING).map(
+    (offset): AnchorHit => ({ offset, direction: 'outgoing' }),
+  );
+  return [...incoming, ...outgoing].sort((a, b) => a.offset - b.offset);
+}
+
+function collectAnchorOffsets(content: Uint8Array, anchor: Uint8Array): number[] {
   const hits: number[] = [];
   let from = 0;
-  while (from <= content.length - MESSAGE_ANCHOR.length) {
-    const at = indexOfBytes(content, MESSAGE_ANCHOR, from);
+  while (from <= content.length - anchor.length) {
+    const at = indexOfBytes(content, anchor, from);
     if (at < 0) break;
     hits.push(at);
-    from = at + MESSAGE_ANCHOR.length;
+    from = at + anchor.length;
   }
   return hits;
 }
