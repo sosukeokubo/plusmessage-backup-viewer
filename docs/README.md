@@ -14,6 +14,16 @@
   何が機能して何が機能しなかったかの記録
 - [open-questions.md](./open-questions.md) — 未解決の疑問と、次に調べるべき
   箇所のチェックリスト
+- [findings-2026-04-25.md](./findings-2026-04-25.md) — 実 62MB ファイルでの
+  検証結果ログ（SMS 復元 17 バケット 61 通の確認、UI 配線の検証）
+
+## 検証スクリプト
+
+実ファイル `PlusMessage.backup` を作業ディレクトリ直下に置いた状態で：
+
+- `pnpm tsx scripts/analyze.ts ./PlusMessage.backup` — パーサ全体の動作確認
+- `pnpm tsx scripts/ui-probe.ts ./PlusMessage.backup` — UI 配線
+  (sidebar + detail) のシミュレーション
 
 ## 前提知識
 
