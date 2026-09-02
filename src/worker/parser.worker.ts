@@ -66,7 +66,7 @@ function handleAttachment(id: number, ref: AttachmentRef) {
     post({ type: 'attachment', id, bytes: sliced }, [sliced.buffer]);
     return;
   }
-  // 'zlib-png' — inflate the slice and ship the decoded PNG bytes.
+  // 'zlib' — inflate the slice and ship the decoded image bytes (PNG or GIF).
   try {
     const decoded = inflate(sliced);
     post({ type: 'attachment', id, bytes: decoded }, [decoded.buffer]);

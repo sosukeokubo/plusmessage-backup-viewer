@@ -72,7 +72,7 @@ export class ParserClient {
 
   /**
    * Request the decoded bytes for an attachment. For `encoding: 'raw'` this is
-   * just a slice of the owned buffer; for `'zlib-png'` the Worker inflates the
+   * just a slice of the owned buffer; for `'zlib'` the Worker inflates the
    * zlib stream and returns the decoded PNG bytes.
    */
   resolveAttachment(ref: AttachmentRef): Promise<Uint8Array> {

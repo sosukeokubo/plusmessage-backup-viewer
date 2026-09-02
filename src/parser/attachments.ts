@@ -92,14 +92,39 @@ export function scanJpegs(body: Uint8Array, baseOffset: number): AttachmentRef[]
   return out;
 }
 
-const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+/**
+ * Image formats we recognise inside zlib-wrapped streams, keyed by their
+ * leading magic bytes. `type` doubles as both `AttachmentRef.kind` and
+ * `contentType` — they are the same string for every format we support.
+ *
+ * GIF87a and GIF89a are listed separately rather than matched on the shared
+ * `GIF8` prefix so an arbitrary `GIF8xx` payload can't slip through.
+ */
+interface ImageSignature {
+  type: 'image/png' | 'image/gif';
+  magic: readonly number[];
+}
 
-function startsWithPngSignature(buf: Uint8Array): boolean {
-  if (buf.length < PNG_SIGNATURE.length) return false;
-  for (let i = 0; i < PNG_SIGNATURE.length; i += 1) {
-    if (buf[i] !== PNG_SIGNATURE[i]) return false;
+const ZLIB_IMAGE_SIGNATURES: readonly ImageSignature[] = [
+  { type: 'image/png', magic: [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a] },
+  { type: 'image/gif', magic: [0x47, 0x49, 0x46, 0x38, 0x37, 0x61] }, // "GIF87a"
+  { type: 'image/gif', magic: [0x47, 0x49, 0x46, 0x38, 0x39, 0x61] }, // "GIF89a"
+];
+
+/** Return the signature whose magic bytes `buf` starts with, or null. */
+function matchImageSignature(buf: Uint8Array): ImageSignature | null {
+  for (const sig of ZLIB_IMAGE_SIGNATURES) {
+    if (buf.length < sig.magic.length) continue;
+    let matched = true;
+    for (let i = 0; i < sig.magic.length; i += 1) {
+      if (buf[i] !== sig.magic[i]) {
+        matched = false;
+        break;
+      }
+    }
+    if (matched) return sig;
   }
-  return true;
+  return null;
 }
 
 /**
@@ -140,15 +165,20 @@ function tryInflate(buf: Uint8Array): { result: Uint8Array; consumed: number } |
 }
 
 /**
- * Scan `body` for zlib-wrapped PNG payloads. A candidate starts at any byte
+ * Scan `body` for zlib-wrapped image payloads. A candidate starts at any byte
  * where CMF=0x78 and (CMF*256+FLG) mod 31 === 0 (the zlib header checksum
  * rule). Each candidate is test-inflated; only those whose inflated output
- * begins with the PNG signature are recorded.
+ * begins with a known image signature (see ZLIB_IMAGE_SIGNATURES) are
+ * recorded.
+ *
+ * The zlib header carries no hint about its payload, so the format can only
+ * be told apart after inflating — which is why the signature test lives here
+ * rather than in the prefilter.
  *
  * The checksum prefilter drops the vast majority of random byte matches
  * before the expensive inflate call, which is important on 65MB backups.
  */
-export function scanPngZlib(body: Uint8Array, baseOffset: number): AttachmentRef[] {
+export function scanZlibImages(body: Uint8Array, baseOffset: number): AttachmentRef[] {
   const out: AttachmentRef[] = [];
   let i = 0;
   while (i < body.length - 1) {
@@ -157,13 +187,14 @@ export function scanPngZlib(body: Uint8Array, baseOffset: number): AttachmentRef
       const flg = body[i + 1]!;
       if (((cmf << 8) | flg) % 31 === 0) {
         const res = tryInflate(body.subarray(i));
-        if (res && startsWithPngSignature(res.result)) {
+        const sig = res && matchImageSignature(res.result);
+        if (res && sig) {
           out.push({
-            kind: 'image/png',
-            contentType: 'image/png',
+            kind: sig.type,
+            contentType: sig.type,
             sourceOffset: baseOffset + i,
             length: res.consumed,
-            encoding: 'zlib-png',
+            encoding: 'zlib',
             decompressedLength: res.result.length,
           });
           i += res.consumed;
@@ -176,9 +207,9 @@ export function scanPngZlib(body: Uint8Array, baseOffset: number): AttachmentRef
   return out;
 }
 
-/** Scan both JPEG and zlib-wrapped PNG attachments, ordered by offset. */
+/** Scan both raw JPEG and zlib-wrapped PNG/GIF attachments, ordered by offset. */
 export function scanAttachments(body: Uint8Array, baseOffset: number): AttachmentRef[] {
-  const all = [...scanJpegs(body, baseOffset), ...scanPngZlib(body, baseOffset)];
+  const all = [...scanJpegs(body, baseOffset), ...scanZlibImages(body, baseOffset)];
   all.sort((a, b) => a.sourceOffset - b.sourceOffset);
   return all;
 }

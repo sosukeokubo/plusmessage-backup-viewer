@@ -1,6 +1,6 @@
 import { deflate } from 'pako';
 import { describe, expect, it } from 'vitest';
-import { findJpegEnd, scanAttachments, scanJpegs, scanPngZlib } from '../src/parser';
+import { findJpegEnd, scanAttachments, scanJpegs, scanZlibImages } from '../src/parser';
 
 /**
  * Build a well-formed (walker-wise) JPEG stream. Pixel data is nonsense but
@@ -98,20 +98,27 @@ describe('scanJpegs', () => {
 
 const PNG_SIGNATURE = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
-/** Build a minimum-valid PNG byte stream (signature + IHDR + IDAT + IEND). */
-function miniPng(): Uint8Array {
-  // The PNG's internal validity doesn't matter for scanPngZlib — it only
-  // checks the 8-byte signature. Pad with deterministic filler so deflate has
-  // real input to chew on and we get a nontrivial zlib stream.
+const GIF89A_SIGNATURE = new Uint8Array([0x47, 0x49, 0x46, 0x38, 0x39, 0x61]);
+const GIF87A_SIGNATURE = new Uint8Array([0x47, 0x49, 0x46, 0x38, 0x37, 0x61]);
+
+/**
+ * Build a byte stream that starts with `signature` and is padded with
+ * deterministic filler. The image's internal validity doesn't matter for
+ * scanZlibImages — it only checks the leading magic bytes. The filler gives
+ * deflate real input to chew on so we get a nontrivial zlib stream.
+ */
+function miniImage(signature: Uint8Array): Uint8Array {
   const filler = new Uint8Array(64);
   for (let i = 0; i < filler.length; i += 1) filler[i] = i & 0xff;
-  const out = new Uint8Array(PNG_SIGNATURE.length + filler.length);
-  out.set(PNG_SIGNATURE, 0);
-  out.set(filler, PNG_SIGNATURE.length);
+  const out = new Uint8Array(signature.length + filler.length);
+  out.set(signature, 0);
+  out.set(filler, signature.length);
   return out;
 }
 
-describe('scanPngZlib', () => {
+const miniPng = () => miniImage(PNG_SIGNATURE);
+
+describe('scanZlibImages', () => {
   it('detects a zlib-wrapped PNG embedded in a larger buffer', () => {
     const png = miniPng();
     const zlib = deflate(png); // pako's zlib-wrapped deflate
@@ -121,49 +128,81 @@ describe('scanPngZlib', () => {
     body.set(zlib, prefix.length);
     body.set([0xde, 0xad, 0xbe, 0xef], prefix.length + zlib.length);
 
-    const refs = scanPngZlib(body, 0x2000);
+    const refs = scanZlibImages(body, 0x2000);
     expect(refs).toHaveLength(1);
     expect(refs[0]).toEqual({
       kind: 'image/png',
       contentType: 'image/png',
       sourceOffset: 0x2000 + prefix.length,
       length: zlib.length,
-      encoding: 'zlib-png',
+      encoding: 'zlib',
       decompressedLength: png.length,
     });
+  });
+
+  // Regression: the real 62MB backup stores 12 GIF attachments this way and
+  // they were all dropped while only the PNG signature was accepted.
+  it.each([
+    ['GIF89a', GIF89A_SIGNATURE],
+    ['GIF87a', GIF87A_SIGNATURE],
+  ])('detects a zlib-wrapped %s image', (_label, signature) => {
+    const gif = miniImage(signature);
+    const zlib = deflate(gif);
+    const prefix = new Uint8Array([0x00, 0x11, 0x22]);
+    const body = new Uint8Array(prefix.length + zlib.length);
+    body.set(prefix, 0);
+    body.set(zlib, prefix.length);
+
+    const refs = scanZlibImages(body, 0x3000);
+    expect(refs).toHaveLength(1);
+    expect(refs[0]).toEqual({
+      kind: 'image/gif',
+      contentType: 'image/gif',
+      sourceOffset: 0x3000 + prefix.length,
+      length: zlib.length,
+      encoding: 'zlib',
+      decompressedLength: gif.length,
+    });
+  });
+
+  it('rejects a GIF8-prefixed payload whose version bytes are not 87a/89a', () => {
+    const fake = miniImage(new Uint8Array([0x47, 0x49, 0x46, 0x38, 0x35, 0x61])); // "GIF85a"
+    expect(scanZlibImages(deflate(fake), 0)).toEqual([]);
   });
 
   it('skips candidate bytes whose CMF/FLG does not satisfy the zlib checksum rule', () => {
     // 0x78 followed by a byte that fails (cmf*256 + flg) % 31 === 0.
     // 0x78 * 256 + 0x00 = 30720, 30720 % 31 = 29 → not a zlib header.
     const body = new Uint8Array([0x78, 0x00, 0x78, 0x01, 0x02, 0x78, 0xff]);
-    expect(scanPngZlib(body, 0)).toEqual([]);
+    expect(scanZlibImages(body, 0)).toEqual([]);
   });
 
-  it('rejects a valid zlib stream whose inflated payload is not a PNG', () => {
-    const notPng = new Uint8Array([0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09]);
-    const zlib = deflate(notPng);
-    expect(scanPngZlib(zlib, 0)).toEqual([]);
+  it('rejects a valid zlib stream whose inflated payload is not a known image', () => {
+    const notImage = new Uint8Array([0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09]);
+    const zlib = deflate(notImage);
+    expect(scanZlibImages(zlib, 0)).toEqual([]);
   });
 
-  it('finds multiple back-to-back zlib-PNG streams', () => {
+  it('finds multiple back-to-back zlib image streams of different formats', () => {
     const a = deflate(miniPng());
-    const b = deflate(miniPng());
+    const b = deflate(miniImage(GIF89A_SIGNATURE));
     const body = new Uint8Array(a.length + b.length);
     body.set(a, 0);
     body.set(b, a.length);
 
-    const refs = scanPngZlib(body, 0);
+    const refs = scanZlibImages(body, 0);
     expect(refs).toHaveLength(2);
+    expect(refs[0]?.kind).toBe('image/png');
     expect(refs[0]?.sourceOffset).toBe(0);
     expect(refs[0]?.length).toBe(a.length);
+    expect(refs[1]?.kind).toBe('image/gif');
     expect(refs[1]?.sourceOffset).toBe(a.length);
     expect(refs[1]?.length).toBe(b.length);
   });
 });
 
 describe('scanAttachments', () => {
-  it('merges JPEG and PNG-zlib hits in offset order', () => {
+  it('merges raw-JPEG and zlib-image hits in offset order', () => {
     const jpeg = miniJpeg();
     const zlib = deflate(miniPng());
     // Layout: [pad] [jpeg] [pad] [zlib] [pad]

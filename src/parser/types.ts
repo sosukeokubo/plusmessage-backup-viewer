@@ -37,7 +37,7 @@ export interface Contact {
 }
 
 export interface Attachment {
-  kind: 'image/jpeg' | 'image/png' | 'unknown';
+  kind: 'image/jpeg' | 'image/png' | 'image/gif' | 'unknown';
   stored: Uint8Array;
   contentType: string;
   sourceOffset: number;
@@ -49,18 +49,20 @@ export interface Attachment {
  * a thumbnail scrolls into view.
  *
  * `encoding` tells the Worker how to materialise the bytes:
- *   - 'raw'       — slice [sourceOffset, sourceOffset+length) as-is.
- *   - 'zlib-png'  — slice, then pako.inflate to recover the PNG stream.
+ *   - 'raw'   — slice [sourceOffset, sourceOffset+length) as-is.
+ *   - 'zlib'  — slice, then pako.inflate to recover the image stream. The
+ *               decoded format (PNG, GIF) is carried by `contentType`, not by
+ *               the encoding, since inflating is identical either way.
  *
  * `decompressedLength` is the size the UI should expect after decoding
  * (equals `length` for raw attachments).
  */
 export interface AttachmentRef {
-  kind: 'image/jpeg' | 'image/png' | 'unknown';
+  kind: 'image/jpeg' | 'image/png' | 'image/gif' | 'unknown';
   contentType: string;
   sourceOffset: number;
   length: number;
-  encoding: 'raw' | 'zlib-png';
+  encoding: 'raw' | 'zlib';
   decompressedLength?: number;
 }
 
@@ -128,7 +130,7 @@ export interface Thread {
   body: Uint8Array;
   /** Printable ASCII strings discovered inside the body (UUIDs, URLs, MIME types). */
   strings: ThreadString[];
-  /** Attachments discovered inside the thread body (JPEG for now, PNG in Step 8). */
+  /** Attachments discovered inside the thread body (raw JPEG, zlib-wrapped PNG/GIF). */
   attachments: AttachmentRef[];
   /** Unresolved bytes in the thread header (flag + size-like u32). */
   headerFlag: number;

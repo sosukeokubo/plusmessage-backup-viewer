@@ -20,6 +20,9 @@
   格納場所を特定（SETTINGS 内に送信アンカー `06…04` で格納されていた）。
   parseInbox を 2 アンカー対応に改修し、`InboxBubble` を direction 別の
   左右レイアウトに変更してブラウザでも確認した
+- [findings-2026-09-02.md](./findings-2026-09-02.md) — zlib 包み GIF 添付の
+  検出対応。`scanPngZlib` を `scanZlibImages` に一般化し、添付を 32 → 44 件に。
+  「画像なし」に見えていた 12 会話の正体は +メッセージのスタンプだった
 
 ## 検証スクリプト
 

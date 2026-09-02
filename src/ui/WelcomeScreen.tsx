@@ -119,7 +119,7 @@ function HonestyCard() {
     <Card icon="💾" title="復元できる範囲について">
       <p style={{ margin: 0 }}>
         このツールはバックアップの仕様を完全には解読していません。
-        取り出せるのは、<strong style={{ color: 'var(--text)' }}>写真（JPEG/PNG）</strong> と、
+        取り出せるのは、<strong style={{ color: 'var(--text)' }}>写真（JPEG/PNG/GIF）</strong> と、
         本文の断片として残っている <strong style={{ color: 'var(--text)' }}>テキスト</strong>{' '}
         だけです。日時・送受信の区別・文脈は復元できません。
       </p>

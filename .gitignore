@@ -6,6 +6,7 @@ coverage
 
 # test / verification artifacts
 .playwright-mcp/
+.playwright-cli/
 /*.png
 
 # tsc --build artifacts
