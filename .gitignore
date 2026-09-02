@@ -4,10 +4,15 @@ coverage
 .vite
 .DS_Store
 
-# test / verification artifacts
+# test / verification artifacts — screenshots and page snapshots of the real
+# backup contain real messages. See CLAUDE.md.
 .playwright-mcp/
 .playwright-cli/
 /*.png
+/*.jpg
+/*.jpeg
+/*.gif
+/*.webp
 
 # tsc --build artifacts
 *.tsbuildinfo
