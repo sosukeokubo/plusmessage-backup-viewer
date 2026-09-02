@@ -42,6 +42,7 @@ function makeMessage(ms: number, text: string): InboxMessage {
     mimeType: 'text/plain',
     timestamp: { ms, iso: new Date(ms).toISOString() },
     direction: 'incoming',
+    transport: 'sms',
     sipMetadata: '',
     offset: 0,
     length: 0,

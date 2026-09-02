@@ -19,8 +19,9 @@ import {
 } from './constants';
 import { iterateTlvs, readTlv } from './tlv';
 import { scanAttachments } from './attachments';
-import { extractPeerNames, findAllPeerIds, parseInbox } from './inbox';
-import { assignThreadPeers, readMediaHeader } from './media';
+import { collectPeerNames, toInboxBuckets } from './inbox';
+import { attachDeliveries, readMediaHeader } from './media';
+import { parseSettings } from './settings';
 import { extractTextRuns } from './textRuns';
 import type {
   Backup,
@@ -30,11 +31,13 @@ import type {
   InboxBucket,
   KeyValueItem,
   KeyValueItemSummary,
+  MediaDelivery,
   Meta,
   MetaSummary,
   ParseProgress,
   RawChunk,
   RawChunkSummary,
+  SettingsPeer,
   Thread,
   ThreadSummary,
   TlvRecord,
@@ -305,6 +308,7 @@ export function parseBackup(
   let meta: Meta | undefined;
   const contacts: Contact[] = [];
   let settings: RawChunk | undefined;
+  let settingsPeers: SettingsPeer[] = [];
   let inbox: InboxBucket[] | undefined;
   const threads: Thread[] = [];
 
@@ -324,11 +328,13 @@ export function parseBackup(
       case SECTION_SETTINGS:
         settings = toRawChunk(rec);
         // SETTINGS is misnamed historically — the 0x0001 section actually
-        // carries the SMS inbox store (per-peer message bodies, timestamps,
-        // SIP metadata). Parse it structurally so the UI can show real text.
+        // carries the message store: one bucket per peer, holding both the
+        // text bodies and the records describing every media file sent.
         try {
-          inbox = parseInbox(rec);
+          settingsPeers = parseSettings(rec);
+          inbox = toInboxBuckets(settingsPeers);
         } catch {
+          settingsPeers = [];
           inbox = [];
         }
         break;
@@ -343,21 +349,20 @@ export function parseBackup(
     }
   }
 
-  // Media records and peer identities live in different sections, so the join
-  // runs once every section has been read rather than inside the loop — the
-  // ordering of SETTINGS vs MESSAGES is not something we want to depend on.
-  let peerNames: Record<string, string> = {};
-  if (settings) {
-    const settingsContent = settings.bytes.subarray(TLV_HEADER_SIZE);
-    assignThreadPeers(threads, settingsContent, findAllPeerIds(settingsContent));
-    peerNames = extractPeerNames(settingsContent);
-  }
+  // The bytes of a media file (MESSAGES) and the record describing it
+  // (SETTINGS) live in different sections, so the join runs once every
+  // section has been read rather than inside the loop — the ordering of
+  // SETTINGS vs MESSAGES is not something we want to depend on.
+  const peerNames = collectPeerNames(settingsPeers);
+  const mediaDeliveries: MediaDelivery[] = settingsPeers.flatMap((peer) => peer.media);
+  attachDeliveries(threads, mediaDeliveries);
 
   const bytesConsumed = reader.offset + (hasTrailingMagic ? MAGIC_BYTES.length : 0);
 
   const backup: Backup = {
     contacts,
     peerNames,
+    mediaDeliveries,
     threads,
     sections,
     unknownSections,

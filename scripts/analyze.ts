@@ -2,25 +2,15 @@
 /**
  * Dump a human-readable snapshot of what the current parser sees in a real
  * PlusMessage.backup. Purpose: answer docs/open-questions.md Q1 — "how many
- * inbox messages does parseInbox actually return on the real file?" — and
- * give us the ground truth needed to decide the next restoration step.
+ * messages does the parser actually recover from the real file?" — and give
+ * us the ground truth needed to decide the next restoration step.
  *
  * Usage:
  *   pnpm tsx scripts/analyze.ts ./PlusMessage.backup
  */
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import {
-  parseBackup,
-  TLV_HEADER_SIZE,
-  SECTION_SETTINGS,
-} from '../src/parser';
-import {
-  ANCHOR_INCOMING,
-  ANCHOR_OUTGOING,
-  findAllAnchors,
-  findAllPeerIds,
-} from '../src/parser/inbox';
+import { parseBackup, TLV_HEADER_SIZE, SECTION_SETTINGS } from '../src/parser';
 
 const SECTION_NAMES: Record<number, string> = {
   0x0001: 'SETTINGS (inbox)',
@@ -53,9 +43,9 @@ function main(): void {
 
   console.log(`## File`);
   console.log(`path:         ${abs}`);
-  console.log(`fileSize:     ${buf.byteLength} bytes (${(buf.byteLength / 1024 / 1024).toFixed(2)} MiB)`);
-  console.log(`anchor IN:    ${Array.from(ANCHOR_INCOMING).map((b) => b.toString(16).padStart(2, '0')).join(' ')}`);
-  console.log(`anchor OUT:   ${Array.from(ANCHOR_OUTGOING).map((b) => b.toString(16).padStart(2, '0')).join(' ')}`);
+  console.log(
+    `fileSize:     ${buf.byteLength} bytes (${(buf.byteLength / 1024 / 1024).toFixed(2)} MiB)`,
+  );
   console.log('');
 
   const t0 = Date.now();
@@ -64,15 +54,21 @@ function main(): void {
 
   console.log(`## Parser output`);
   console.log(`parserVersion:   ${backup.parserVersion}`);
-  console.log(`bytesConsumed:   ${backup.bytesConsumed} / ${backup.fileSize} ${backup.bytesConsumed === backup.fileSize ? 'OK' : 'SHORT'}`);
+  console.log(
+    `bytesConsumed:   ${backup.bytesConsumed} / ${backup.fileSize} ${backup.bytesConsumed === backup.fileSize ? 'OK' : 'SHORT'}`,
+  );
   console.log(`parse time:      ${parseMs} ms`);
-  console.log(`sections:        ${backup.sections.length} (unknown: ${backup.unknownSections.length})`);
+  console.log(
+    `sections:        ${backup.sections.length} (unknown: ${backup.unknownSections.length})`,
+  );
   console.log('');
 
   console.log(`## TLV sections`);
   for (const sec of backup.sections) {
     const name = SECTION_NAMES[sec.type] ?? '?';
-    console.log(`  ${hex4(sec.type).padEnd(6)}  ${name.padEnd(18)}  offset=0x${sec.offset.toString(16).padStart(8, '0')}  length=${sec.bytes.length}`);
+    console.log(
+      `  ${hex4(sec.type).padEnd(6)}  ${name.padEnd(18)}  offset=0x${sec.offset.toString(16).padStart(8, '0')}  length=${sec.bytes.length}`,
+    );
   }
   console.log('');
 
@@ -101,39 +97,35 @@ function main(): void {
     console.log('  (no SETTINGS section)');
   } else {
     const s = backup.settings;
-    console.log(`  section offset=0x${s.offset.toString(16)} length=${s.bytes.length} (content=${s.bytes.length - TLV_HEADER_SIZE})`);
+    console.log(
+      `  section offset=0x${s.offset.toString(16)} length=${s.bytes.length} (content=${s.bytes.length - TLV_HEADER_SIZE})`,
+    );
     if (s.type !== SECTION_SETTINGS) {
       console.log(`  WARN: section type=${hex4(s.type)} does not match SECTION_SETTINGS`);
     }
     const content = s.bytes.subarray(TLV_HEADER_SIZE);
 
-    const anchors = findAllAnchors(content);
-    const incomingCount = anchors.filter((a) => a.direction === 'incoming').length;
-    const outgoingCount = anchors.filter((a) => a.direction === 'outgoing').length;
-    console.log(`  anchor hits total:       ${anchors.length}  (in=${incomingCount}, out=${outgoingCount})`);
-    if (anchors.length > 0) {
-      const sample = anchors.slice(0, 5)
-        .map((a) => `${a.direction === 'incoming' ? 'IN ' : 'OUT'} 0x${a.offset.toString(16)}`)
-        .join(', ');
-      console.log(`  first 5 anchor offsets:  ${sample}`);
+    // The section is a counted container of peer buckets; walking it is the
+    // observation. See scripts/scan-settings.ts for the full breakdown.
+    const view = new DataView(content.buffer, content.byteOffset, content.byteLength);
+    let cursor = 4;
+    let buckets = 0;
+    while (cursor + TLV_HEADER_SIZE <= content.length) {
+      const len = view.getUint32(cursor + 6, true);
+      if (len > content.length - cursor - TLV_HEADER_SIZE) break;
+      cursor += TLV_HEADER_SIZE + len;
+      buckets += 1;
     }
-
-    const peers = findAllPeerIds(content);
-    const peerCounts = new Map<string, number>();
-    for (const p of peers) {
-      peerCounts.set(p.peerId, (peerCounts.get(p.peerId) ?? 0) + 1);
-    }
-    const uniquePeers = [...peerCounts.entries()].sort((a, b) => b[1] - a[1]);
-    console.log(`  peer markers (total):    ${peers.length}`);
-    console.log(`  peer markers (unique):   ${uniquePeers.length}`);
-    console.log(`  top 10 peers by count:`);
-    for (const [peerId, count] of uniquePeers.slice(0, 10)) {
-      console.log(`    ${count.toString().padStart(3)} × ${peerId}`);
-    }
+    console.log(`  declared peer count:     ${view.getUint32(0, true)}`);
+    console.log(`  peer buckets walked:     ${buckets}`);
+    console.log(
+      `  bytes consumed:          ${cursor}/${content.length}` +
+        `${cursor === content.length ? ' (exact)' : ' (MISMATCH)'}`,
+    );
   }
   console.log('');
 
-  console.log(`## parseInbox result`);
+  console.log(`## recovered messages`);
   const inbox = backup.inbox ?? [];
   const totalMessages = inbox.reduce((acc, b) => acc + b.messages.length, 0);
   const incomingTotal = inbox.reduce(
@@ -159,7 +151,9 @@ function main(): void {
       const inCount = b.messages.filter((m) => m.direction === 'incoming').length;
       const outCount = b.messages.filter((m) => m.direction === 'outgoing').length;
       const dirLabel = `in=${inCount.toString().padStart(2)} out=${outCount.toString().padStart(2)}`;
-      console.log(`    [${i}] peer=${peer.padEnd(44)} msgs=${b.messages.length.toString().padStart(3)} ${dirLabel} first=${firstIso.slice(0, 19)}  mime=${mime}`);
+      console.log(
+        `    [${i}] peer=${peer.padEnd(44)} msgs=${b.messages.length.toString().padStart(3)} ${dirLabel} first=${firstIso.slice(0, 19)}  mime=${mime}`,
+      );
       if (firstText) {
         console.log(`         text: ${firstText}`);
       }

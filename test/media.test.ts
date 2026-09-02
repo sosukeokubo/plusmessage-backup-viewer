@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { assignThreadPeers, readMediaHeader } from '../src/parser/media';
-import type { PeerMarker } from '../src/parser/inbox';
-import type { Thread } from '../src/parser/types';
+import { attachDeliveries, readMediaHeader } from '../src/parser/media';
+import type { MediaDelivery, Thread } from '../src/parser/types';
 
 const encoder = new TextEncoder();
 
@@ -30,8 +29,12 @@ function mediaBody(name: string, path: string, mime: string, payload = [0xff, 0x
   return concat(field(name), field(path), field(mime), new Uint8Array(payload));
 }
 
-function makeThread(threadId: number, name: string): Thread {
-  const body = mediaBody(name, `0,https://example.test/${name}`, 'image/png');
+function makeThread(
+  threadId: number,
+  name: string,
+  path = `0,https://example.test/${name}`,
+): Thread {
+  const body = mediaBody(name, path, 'image/png');
   const media = readMediaHeader(body);
   const thread: Thread = {
     id: `thread-${threadId}`,
@@ -43,7 +46,15 @@ function makeThread(threadId: number, name: string): Thread {
     raw: { type: 0x0006, offset: 0, bytes: body },
     body,
     strings: [],
-    attachments: [],
+    attachments: [
+      {
+        kind: 'image/png',
+        contentType: 'image/png',
+        sourceOffset: threadId * 1000,
+        length: 128,
+        encoding: 'raw',
+      },
+    ],
     headerFlag: 0,
     headerSizeField: 0,
   };
@@ -91,43 +102,73 @@ describe('readMediaHeader', () => {
   });
 });
 
-describe('assignThreadPeers', () => {
-  // SETTINGS shape: each peer marker is followed by the message records that
-  // mention the media it delivered.
-  const settingsText =
-    '\x1e+818011111111\x1e ...<file-name>alpha</file-name>... url=/alpha ' +
-    '\x1eoperator@kw.ncs.spmode.ne.jp\x1e ...<file-name>beta</file-name>...';
-  const settings = encoder.encode(settingsText);
-  const peers: PeerMarker[] = [
-    { offset: settingsText.indexOf('\x1e+81'), peerId: '+818011111111' },
-    {
-      offset: settingsText.indexOf('\x1eoperator@'),
-      peerId: 'operator@kw.ncs.spmode.ne.jp',
-    },
-  ];
+function delivery(over: Partial<MediaDelivery> & { name: string }): MediaDelivery {
+  return {
+    peerId: '+819012340001',
+    timestamp: { ms: 1700000000000, iso: new Date(1700000000000).toISOString() },
+    direction: 'incoming',
+    contentType: 'image/png',
+    category: 'image/png',
+    isSticker: false,
+    sourcePath: `0,https://example.test/${over.name}`,
+    offset: 0,
+    length: 0,
+    ...over,
+  };
+}
 
-  it('assigns the nearest preceding peer to each media record', () => {
-    const threads = [makeThread(1, 'alpha'), makeThread(2, 'beta')];
-    assignThreadPeers(threads, settings, peers);
-    expect(threads[0]?.peerId).toBe('+818011111111');
-    expect(threads[1]?.peerId).toBe('operator@kw.ncs.spmode.ne.jp');
+describe('attachDeliveries', () => {
+  it('resolves the peer and stamps the attachment from the matching delivery', () => {
+    const threads = [makeThread(1, 'alpha')];
+    attachDeliveries(threads, [
+      delivery({
+        name: 'alpha',
+        peerId: 'operator@kw.ncs.spmode.ne.jp',
+        direction: 'outgoing',
+        category: 'image/png|basic-sticker',
+        isSticker: true,
+      }),
+    ]);
+    expect(threads[0]?.peerId).toBe('operator@kw.ncs.spmode.ne.jp');
+    const attachment = threads[0]?.attachments[0];
+    expect(attachment?.timestamp?.ms).toBe(1700000000000);
+    expect(attachment?.direction).toBe('outgoing');
+    expect(attachment?.category).toBe('image/png|basic-sticker');
+    expect(attachment?.isSticker).toBe(true);
   });
 
-  it('leaves a name that resolves to two peers unassigned', () => {
-    const text = '\x1e+818011111111\x1e gamma \x1e+818022222222\x1e gamma';
-    const ambiguous = encoder.encode(text);
-    const marks: PeerMarker[] = [
-      { offset: text.indexOf('\x1e+818011111111'), peerId: '+818011111111' },
-      { offset: text.indexOf('\x1e+818022222222'), peerId: '+818022222222' },
-    ];
-    const threads = [makeThread(3, 'gamma')];
-    assignThreadPeers(threads, ambiguous, marks);
+  // The app appends the save time to a file it stored locally, so the THREAD
+  // name and the RCS descriptor name differ for everything the user sent.
+  // Both still agree on the source path.
+  it('falls back to the source path when the stored name gained a suffix', () => {
+    const path = '0,/var/mobile/Containers/Data/Application/AAAA/IMG_20230330_174646.jpg';
+    const threads = [makeThread(2, 'IMG_20230330_174646_1681607355610.jpg', path)];
+    attachDeliveries(threads, [
+      delivery({ name: 'IMG_20230330_174646.jpg', sourcePath: path, direction: 'outgoing' }),
+    ]);
+    expect(threads[0]?.peerId).toBe('+819012340001');
+    expect(threads[0]?.attachments[0]?.direction).toBe('outgoing');
+  });
+
+  it('hands a repeated key out once each, in file order', () => {
+    const threads = [makeThread(3, 'same'), makeThread(4, 'same')];
+    attachDeliveries(threads, [
+      delivery({ name: 'same', timestamp: { ms: 1000, iso: 'first' } }),
+      delivery({ name: 'same', timestamp: { ms: 2000, iso: 'second' } }),
+    ]);
+    expect(threads.map((t) => t.attachments[0]?.timestamp?.ms)).toEqual([1000, 2000]);
+  });
+
+  it('leaves a thread untouched when nothing matches', () => {
+    const threads = [makeThread(5, 'orphan')];
+    attachDeliveries(threads, [delivery({ name: 'other' })]);
     expect(threads[0]?.peerId).toBeUndefined();
+    expect(threads[0]?.attachments[0]?.timestamp).toBeUndefined();
   });
 
-  it('leaves a name that never appears in SETTINGS unassigned', () => {
-    const threads = [makeThread(4, 'missing')];
-    assignThreadPeers(threads, settings, peers);
+  it('does nothing when there are no deliveries', () => {
+    const threads = [makeThread(6, 'alpha')];
+    attachDeliveries(threads, []);
     expect(threads[0]?.peerId).toBeUndefined();
   });
 });

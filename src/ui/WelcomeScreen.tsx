@@ -49,15 +49,7 @@ export function WelcomeScreen({ onFile }: Props) {
   );
 }
 
-function Card({
-  icon,
-  title,
-  children,
-}: {
-  icon: string;
-  title: string;
-  children: ReactNode;
-}) {
+function Card({ icon, title, children }: { icon: string; title: string; children: ReactNode }) {
   return (
     <article
       style={{
@@ -118,10 +110,14 @@ function HonestyCard() {
   return (
     <Card icon="💾" title="復元できる範囲について">
       <p style={{ margin: 0 }}>
-        このツールはバックアップの仕様を完全には解読していません。
-        取り出せるのは、<strong style={{ color: 'var(--text)' }}>写真（JPEG/PNG/GIF）</strong> と、
-        本文の断片として残っている <strong style={{ color: 'var(--text)' }}>テキスト</strong>{' '}
-        だけです。日時・送受信の区別・文脈は復元できません。
+        <strong style={{ color: 'var(--text)' }}>本文・写真・スタンプ</strong> を、
+        <strong style={{ color: 'var(--text)' }}>送受信の日時と向き</strong>{' '}
+        つきで会話ごとに時系列で復元します。
+      </p>
+      <p style={{ margin: '8px 0 0' }}>
+        ただしバックアップの仕様を完全に解読できたわけではありません。
+        添付の音声・動画・位置情報や、既読状態は取り出せません。
+        解読できていない領域から拾えた文字列は「テキスト断片」として別に表示します。
       </p>
     </Card>
   );
@@ -133,8 +129,7 @@ function HowtoCard() {
     <Card icon="📂" title="バックアップファイルとは">
       <p style={{ margin: '0 0 8px' }}>
         ＋メッセージアプリの「設定 → バックアップ・復元」から作成できる{' '}
-        <code style={{ fontFamily: 'var(--mono)' }}>PlusMessage.backup</code>{' '}
-        ファイルです。
+        <code style={{ fontFamily: 'var(--mono)' }}>PlusMessage.backup</code> ファイルです。
       </p>
       <button
         type="button"
@@ -155,7 +150,10 @@ function HowtoCard() {
           <li>＋メッセージアプリを開く</li>
           <li>メニュー → 設定 → バックアップ・復元</li>
           <li>バックアップを作成し、保存場所を確認</li>
-          <li>その <code style={{ fontFamily: 'var(--mono)' }}>.backup</code> ファイルをこのページにドラッグ</li>
+          <li>
+            その <code style={{ fontFamily: 'var(--mono)' }}>.backup</code>{' '}
+            ファイルをこのページにドラッグ
+          </li>
         </ol>
       )}
     </Card>

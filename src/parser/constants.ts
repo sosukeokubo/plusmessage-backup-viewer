@@ -17,6 +17,18 @@ export const SECTION_CONTACTS = 0x000d;
 export const ITEM_KEY_VALUE = 0x000c;
 export const ITEM_CONTACT = 0x000e;
 
+/** Records nested inside SETTINGS — see `parseSettings`. */
+export const ITEM_PEER_BUCKET = 0x0002;
+export const ITEM_CONVERSATION = 0x0003;
+export const ITEM_BUCKET_END = 0x0004;
+
+/** Bytes a peer bucket header spends on everything but the peer id itself. */
+export const PEER_HEADER_FIXED_SIZE = 44;
+
+/** `A` field of a 0x0003 record: 0 = text message, 4 = media delivery. */
+export const CONVERSATION_TEXT = 0;
+export const CONVERSATION_MEDIA = 4;
+
 export const CONTACT_TAIL_SIZE = 20;
 
 export const THREAD_HEADER_SIZE = 11;
@@ -33,6 +45,9 @@ export const SECTION_NAMES: Record<number, string> = {
   [SECTION_CONTACTS]: 'CONTACTS',
   [ITEM_KEY_VALUE]: 'KEY_VALUE',
   [ITEM_CONTACT]: 'CONTACT',
+  [ITEM_PEER_BUCKET]: 'PEER_BUCKET',
+  [ITEM_CONVERSATION]: 'CONVERSATION',
+  [ITEM_BUCKET_END]: 'BUCKET_END',
 };
 
 export const PARSER_VERSION = '0.1.0';

@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import type { InboxMessage, ThreadSummary } from '../parser/types';
+import type { AttachmentRef, InboxMessage, ThreadSummary } from '../parser/types';
 import type { ParserClient } from '../worker/parserClient';
 import type { ResolvedContact } from '../util/contactResolver';
 import { filterMessageStrings } from '../util/stringFilter';
@@ -37,6 +37,11 @@ function formatInboxTimestamp(ms: number): string {
 
 const STRING_ROW_HEIGHT = 44;
 
+/** One entry of the merged conversation view, ordered by `ms`. */
+type TimelineEntry =
+  | { key: string; ms: number; kind: 'text'; message: InboxMessage }
+  | { key: string; ms: number; kind: 'media'; attachment: AttachmentRef };
+
 export function ThreadDetail({
   thread,
   contact,
@@ -52,10 +57,36 @@ export function ThreadDetail({
     return debug ? thread.strings : filterMessageStrings(thread.strings);
   }, [thread, debug]);
 
-  const sortedInbox = useMemo(() => {
-    if (!inboxMessages || inboxMessages.length === 0) return [];
-    return [...inboxMessages].sort((a, b) => a.timestamp.ms - b.timestamp.ms);
-  }, [inboxMessages]);
+  // Text bodies and media arrive from different sections but describe one
+  // conversation, so they are merged into a single ordered list rather than
+  // shown as two stacked blocks. Attachments whose delivery record could not
+  // be matched have no timestamp and keep the old grid below.
+  const { timeline, undatedAttachments } = useMemo(() => {
+    const entries: TimelineEntry[] = [];
+    for (const message of inboxMessages ?? []) {
+      entries.push({
+        key: `msg:${message.id}:${message.offset}`,
+        ms: message.timestamp.ms,
+        kind: 'text',
+        message,
+      });
+    }
+    const undated: AttachmentRef[] = [];
+    for (const attachment of thread?.attachments ?? []) {
+      if (attachment.timestamp) {
+        entries.push({
+          key: `att:${attachment.sourceOffset}:${attachment.length}`,
+          ms: attachment.timestamp.ms,
+          kind: 'media',
+          attachment,
+        });
+      } else {
+        undated.push(attachment);
+      }
+    }
+    entries.sort((a, b) => a.ms - b.ms);
+    return { timeline: entries, undatedAttachments: undated };
+  }, [inboxMessages, thread]);
 
   const stringsScrollRef = useRef<HTMLDivElement>(null);
   const virtualizer = useVirtualizer({
@@ -89,9 +120,9 @@ export function ThreadDetail({
   const photoCount = thread.attachments.length;
   const totalStrings = thread.strings.length;
   const shownStrings = visibleStrings.length;
-  const inboxCount = sortedInbox.length;
+  const messageCount = timeline.filter((e) => e.kind === 'text').length;
   const headerSummary = [
-    inboxCount > 0 ? `メッセージ ${inboxCount} 件` : null,
+    messageCount > 0 ? `メッセージ ${messageCount} 件` : null,
     photoCount > 0 ? `写真 ${photoCount} 枚` : null,
     shownStrings > 0 ? `テキスト断片 ${shownStrings} 件` : null,
   ]
@@ -176,23 +207,34 @@ export function ThreadDetail({
           表示される場合があります。
         </div>
 
-        {inboxCount > 0 && (
+        {timeline.length > 0 && (
           <section style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)' }}>
             <h3 style={{ fontSize: 13, margin: '0 0 8px', color: 'var(--text-muted)' }}>
-              会話 {inboxCount} 件
+              会話 {timeline.length} 件
             </h3>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {sortedInbox.map((m) => (
-                <InboxBubble key={m.id} message={m} />
-              ))}
+              {timeline.map((entry) =>
+                entry.kind === 'text' ? (
+                  <InboxBubble key={entry.key} message={entry.message} />
+                ) : client ? (
+                  <MediaBubble
+                    key={entry.key}
+                    client={client}
+                    attachment={entry.attachment}
+                    debug={debug}
+                    onJumpToOffset={debug ? onJumpToOffset : undefined}
+                    onOpen={(url) => setLightbox(url)}
+                  />
+                ) : null,
+              )}
             </div>
           </section>
         )}
 
-        {photoCount > 0 && client && (
+        {undatedAttachments.length > 0 && client && (
           <section style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)' }}>
             <h3 style={{ fontSize: 13, margin: '0 0 8px', color: 'var(--text-muted)' }}>
-              写真 {photoCount} 枚
+              日時が特定できなかった写真 {undatedAttachments.length} 枚
             </h3>
             <div
               style={{
@@ -201,7 +243,7 @@ export function ThreadDetail({
                 gap: 8,
               }}
             >
-              {thread.attachments.map((a) => (
+              {undatedAttachments.map((a) => (
                 <AttachmentImage
                   key={`${a.sourceOffset}:${a.length}`}
                   client={client}
@@ -356,6 +398,64 @@ function InboxBubble({ message }: { message: InboxMessage }) {
       >
         {hasText ? body : <span style={{ color: 'var(--text-muted)' }}>（本文なし）</span>}
       </div>
+      {stamp && (
+        <div
+          style={{
+            fontSize: 11,
+            color: 'var(--text-muted)',
+            marginTop: 2,
+            paddingLeft: isOutgoing ? 0 : 4,
+            paddingRight: isOutgoing ? 4 : 0,
+          }}
+        >
+          {stamp}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * A media file in the conversation flow, aligned like a text bubble.
+ *
+ * Stickers are rendered without bubble chrome: in +message they are artwork
+ * dropped into the conversation, not a boxed attachment, and framing them
+ * like a photo misrepresents what the user actually saw.
+ */
+function MediaBubble({
+  client,
+  attachment,
+  debug,
+  onJumpToOffset,
+  onOpen,
+}: {
+  client: ParserClient;
+  attachment: AttachmentRef;
+  debug: boolean;
+  onJumpToOffset?: ((offset: number) => void) | undefined;
+  onOpen: (url: string) => void;
+}) {
+  const isOutgoing = attachment.direction === 'outgoing';
+  const stamp = attachment.timestamp ? formatInboxTimestamp(attachment.timestamp.ms) : '';
+  const sticker = attachment.isSticker === true;
+  return (
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: isOutgoing ? 'flex-end' : 'flex-start',
+        alignSelf: isOutgoing ? 'flex-end' : 'flex-start',
+        maxWidth: sticker ? 200 : 260,
+      }}
+    >
+      <AttachmentImage
+        client={client}
+        attachment={attachment}
+        debug={debug}
+        onJumpToOffset={onJumpToOffset}
+        onOpen={onOpen}
+        variant={sticker ? 'bare' : 'tile'}
+      />
       {stamp && (
         <div
           style={{

@@ -5,6 +5,14 @@ undefined」を解いた記録。あわせて Q2 / Q4-bis / Q9 も決着した�
 
 対象ファイル: `PlusMessage.backup` (65,159,882 B)
 
+> **補足 (2026-09-03): ここで採用した紐付け手法は置き換えられている。**
+> 「メディア名を SETTINGS 全域から探し、最寄りのピア マーカーを取る」という
+> 逆引きは、SETTINGS が入れ子 TLV でメディア配信レコードが最初からピアの
+> バケット内に入っていると分かったため不要になった。結論（0x0006 は会話では
+> なくメディア 1 件、44/44 が解決する、サービスアドレス 2 件の取りこぼしが
+> あった）はいずれも正しいまま。
+> 詳細: [findings-2026-09-03-settings.md](./findings-2026-09-03-settings.md)。
+
 ## 1. Q4 に書いてあった検証方法は空振りする
 
 当初の計画は「各 thread body から `findAllPeerPhones` で `+`電話番号を探す」
@@ -178,7 +186,7 @@ threads=44  peer解決済み=44  buckets=18  names=2
 ## 9. 使用スクリプト
 
 ```
-pnpm tsx scripts/scan-thread-peers.ts ./PlusMessage.backup
+pnpm tsx scripts/scan-settings.ts ./PlusMessage.backup
 ```
 
 Section 1 の「thread body に電話番号は無い」チェックも、空振りすること自体が

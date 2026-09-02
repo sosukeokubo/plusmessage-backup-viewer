@@ -1,143 +1,140 @@
-# セクション 0x0001「SETTINGS」(= SMS + +メッセージ統合本文ストア) の解析
+# セクション 0x0001「SETTINGS」= メッセージストア本体
 
-## 発見の経緯
+## 結論
 
-コンスタントに「SETTINGS」と名付けていたが、実ファイルを 16 進ダンプして覗くと
-**2020～2025 年に受信した SMS の本文が日本語テキストで直接格納されていた**。
-51 件の完全なメッセージと、NTT ドコモのウェルカム通知、フレンド申請、当選確認
-詐欺メール等が UTF-8 で読める形で入っている。
+歴史的に「SETTINGS」と名付けられているが、実体は **SMS と +メッセージを統合した
+メッセージストア**である。しかも不透明なブロブではなく、
+**ファイル全体と同じ 10 バイト TLV が入れ子になった構造体**で、
+`u32 の件数` から末尾まで誤差ゼロで辿り切れる。
 
-2026-04-26 の追加検証で、**送信側 +メッセージもここに同じ形式で格納されている**
-ことが判明 ([findings-2026-04-26.md](./findings-2026-04-26.md))。
-ユーザー提供のスクリーンショットから抽出した送信フレーズ 4 件はすべて SETTINGS
-範囲内でヒットし、MESSAGES (0x0005) 範囲では 0 件だった。
+構造の解読経緯と実測値は
+[findings-2026-09-03-settings.md](./findings-2026-09-03-settings.md) にある。
 
-したがって、このセクションは **SMS と +メッセージの送受信を統合した本文ストア** である。
-受信と送信は **アンカーパターン 1 バイト** で区別される。
-
-## 観測された構造（仮説）
-
-section content の先頭からいくつかの「peer bucket」が並んでいる。各 bucket は
-1 人の相手ごとのメッセージ束と見られる。
+## 構造
 
 ```
-SETTINGS content:
-  [peer bucket 0]
-  [peer bucket 1]
-  ...
+SETTINGS content
+├ u32 peerCount                          実ファイルでは 20
+└ TLV(0x0002) × peerCount                ピア バケット（ピア ID 昇順）
+   ├ header (TLV の field1 バイト)
+   └ TLV(0x0003) × n → TLV(0x0004)       会話レコードと終端
 ```
 
-### peer bucket (仮説)
+TLV ヘッダは `u16 type` + `u32 field1` + `u32 contentLen`
+（[tlv.ts](../src/parser/tlv.ts) と共通）。
+
+### ピア バケット (0x0002)
+
+TLV の `field1` は**ヘッダ長**で、値は **`44 + ピア ID のバイト長`**。
+13 桁の電話番号なら 57 (= 0x39)、`operator@kw.ncs.spmode.ne.jp` なら 72、
+40 文字の docomo アドレスなら 84。以前「常に 0x39」と記録していたのは
+20 件中 18 件が 13 桁の電話番号だったための誤り。
 
 ```
-+0      u16 0x0002                    tag?
-+2      u32 0x00000039                常に 0x39 (= 57) を観測
-+6      u32 bucketSize                このバケットの総バイト数
-+10     u32 0x00000001                flag?
-+14     12 bytes zero pad
-+26     u32 contactBlobLen            続く contact blob の長さ
-+30     <contact blob>                Contact セクションと同形式の ASCII
-+...    4 bytes pad
-+...    [message 0] [message 1] ...
++0   u32   後続する 0x0003 レコード数
++4   u32   未解読
++8   u32   うちメディア配信の件数
++12  20 B  未解読
++32  u32   ピア ID のバイト長
++36  <ピア ID>                            "+81…" または service@domain
++..  8 B   未解読
 ```
 
-### message レコード
+### 会話レコード (0x0003)
 
-各メッセージは 20 バイトのアンカーで始まる。アンカーには 2 種類あり、
-1 バイト目と 13 バイト目の値で受信／送信を区別できる
-([findings-2026-04-26.md](./findings-2026-04-26.md) Section 1):
-
-| 種別 | 20 バイトアンカー | mime 値 |
-|-----|------------------|---------|
-| 受信 (SMS / +メッセージ受信) | `07 00 00 00  01 00 00 00  00 00 00 00  05 00 00 00  00 00 00 00` | `text/plain;charset=utf-8` |
-| 送信 (+メッセージ送信)        | `06 00 00 00  01 00 00 00  00 00 00 00  04 00 00 00  00 00 00 00` | `text/plain` |
-
-以下のレイアウトは両者で完全に共通:
+前段は本文・メディアで共通:
 
 ```
-+0      20 bytes MESSAGE_ANCHOR
-+20     i64 LE  timestamp_ms           Unix ms。例: 0x0000019823a4511c = 2025-08-01 JST
-+28     u32 LE  textLen
-+32     textLen bytes UTF-8 本文
-+...    u32 LE  mimeLen                通常 24 ("text/plain;charset=utf-8" の長さ)
-+...    mimeLen bytes MIME
-+...    1 byte  0x20 (space?)          一貫して現れるが意味未確定
-+...    u32 LE  uuidLen                32 を観測
-+...    32 bytes message UUID (ASCII)  8-4-4-4-12 ハイフン付き
-+...    u32 LE  sipLen
-+...    sipLen bytes SIP metadata      "|<UUID>|<ISO8601>|<sip:from>|<sip:to>|1|1|0||"
-+...    8 bytes pad
-+...    i64 LE  timestamp_ms 再掲
-+...    16 bytes pad + 0xFFFF 0x1F + pad
-+...    u32 LE  nextSegmentLen?        次のメッセージ冒頭との境界を示す？
++0   u16   variant                        0 = 本文, 4 = メディア配信, 8 = サービス定義
++2   u16   0x0003
++4   u32   バケット内の連番（降順に並ぶ）
++8   u32   contact blob 長
++12  <contact blob>                       GS 区切り。末尾に RS で囲んだピア ID
++..  u32   2 個目の contact blob 長（0 のことが多い）
++..  <contact blob>                       1 個目と同一内容
++..  u32 × 5
++..  i64   タイムスタンプ (Unix ms)
 ```
 
-### 送受信方向について
+contact blob の形は Contact セクションと同じ:
 
-SIP メタデータの From / To はすべて `<sip:anonymous@anonymous.invalid>` で、
-pipe で区切られたフラグも `|1|1|0|` で一定 — **SIP からは方向を復元できない**。
-ただし上記のとおり **アンカー先頭 1 バイトで判別可能** (受信=`0x07`、送信=`0x06`)。
-これに加えて mime 値も「`text/plain;charset=utf-8` なら受信」「`text/plain` なら
-送信」というシグナルになるが、アンカー判定で十分。
+```
+0 GS GS <表示名> GS tel GS <番号> GS GS tel:<番号> GS <番号> GS GS GS GS RS <ピア ID> RS
+```
+
+`tel` タグの直前が表示名。CONTACTS (0x000d) 側は実ファイルでは 85 件すべて
+名前が空なので、**名前が残っているのはここだけ**。
+
+#### variant = 0 — 本文
+
+`u32 × 5` のうち **index 0 が方向、index 3 が経路**。
+
+| index 0 | index 3 | MIME | 実ファイル件数 |
+|---|---|---|---|
+| 7 = 受信 | 5 = SMS | `text/plain;charset=utf-8` | 62 |
+| 7 = 受信 | 4 = +メッセージ | `text/plain` | 45 |
+| 6 = 送信 | 4 = +メッセージ | `text/plain` | 5 |
+
+後段:
+
+```
+[i64 送信時刻][str 本文][str MIME][str メッセージ ID (32 文字)][str SIP メタデータ]
+[u32][i64 保存時刻] …
+```
+
+文字列はすべて `[u32 LE 長さ][UTF-8 バイト列]`。
+
+**方向は SIP からは復元できない。** 実ファイルの SIP From/To は全件
+`<sip:anonymous@anonymous.invalid>`、フラグも `|1|1|0|` で一定。
+上記 index 0 を読むのが正しい。
+
+#### variant = 4 — メディア配信
+
+```
+[i64 送信時刻][u32 × 2][i64 資材の有効期限][u32 × 2]
+[str 取得元パス][str カテゴリ][u32]
+[str サムネの MIME][str 配信 ID][str RCS <file> XML]
+[u32 × 2][i64 保存時刻]
+```
+
+- **取得元パス**: `0,` 接頭辞つき。`0,https://a-wss…`（キャリア資材サーバ）、
+  `0,app://photos-kit/…` / `0,/var/mobile/…`（端末ローカル）
+- **カテゴリ**: `image/png|basic-sticker`、`image/jpeg`、`image/png|chatbot`
+- **サムネの MIME**: 本体の型ではない。GIF スタンプでもここは `image/png`
+- **XML**: `type="thumbnail"` と `type="file"` の 2 つの `<file-info>`。
+  `<file-name>` は後者にしかなく、これが THREAD (0x0006) との結合キー
+
+#### variant = 8 — サービス定義
+
+docomo 公式アカウントのバケットに 1 件だけある。contact blob に `isbot true`
+を含み、会話ではなくボットの定義と読める。デコードせず件数のみ数えている
+（`SettingsPeer.unknownRecords`）。Q13。
 
 ## 実装
 
-現在の実装 [src/parser/inbox.ts](../src/parser/inbox.ts) は、バケット枠を
-信用せず「アンカーベース走査」に切り替えてある:
+[src/parser/settings.ts](../src/parser/settings.ts) が上記をそのまま辿る。
+[src/parser/inbox.ts](../src/parser/inbox.ts) はその結果を UI 向けの
+`InboxBucket[]` に射影するだけの薄いアダプタ。
 
-1. セクション全域から `+`-phone (長さ接頭辞付き ASCII) を全部収集
-2. セクション全域から 20 バイト MESSAGE_ANCHOR を全部収集
-3. 各アンカーを「直前の `+`-phone」に紐付けて message を展開
-4. 同じ相手のアンカーを 1 つの `InboxBucket` にまとめる
+以前の実装はバケット枠を信用せず 20 バイトの「アンカー」をバイト列として
+総当たり検索していた。方向と経路が独立した 2 軸であることに気づいておらず
+**受信 +メッセージ 45 通を 1 通も拾えていなかった**。構造を辿れば探索は不要。
 
-これにより、未解析のバケットヘッダ（前掲の仮説部分）が壊れていても
-メッセージは取り出せる設計。ただし **この実装で実ファイルから何件取れて
-いるかは未検証**。UI 上はまだ "会話 N" のフォールバック表示のままなので、
-このパイプラインがどこかで落ちている可能性が高い。
+## 検証
 
-## 未解決の疑問
+```bash
+pnpm tsx scripts/scan-settings.ts ./PlusMessage.backup
+```
 
-1. **バケットヘッダの不変量**
-   `02 00 00 00 39 00 00 00` が常に先頭に来るかは確認待ち。
-   アンカー走査でメッセージ自体は取れるが、「どこまでが 1 バケットか」を
-   確定するにはヘッダを読む必要がある
+実ファイルでの結果: 20 ピア / 本文 112 通 (受信 SMS 62・受信 +メッセージ 45・
+送信 +メッセージ 5) / メディア配信 44 件。バケットヘッダの宣言件数と
+デコード結果は 20 バケットすべてで一致。
 
-2. ✅ **送信メッセージの存在** (2026-04-26 解決) — 送信メッセージは
-   別アンカー (`06…04`) で同じ SETTINGS 内に格納されている。
-   詳細: [findings-2026-04-26.md](./findings-2026-04-26.md)
+## 未解決
 
-3. ✅ **+メッセージ本文はどちらに入るのか** (2026-04-26 解決) — **仮説 B 確定**:
-   SMS と +メッセージの両方とも SETTINGS に入る。
-
-4. ✅ **MESSAGES (0x0005) 内の本文所在** (2026-04-26 解決) — **本文は無い**。
-   MESSAGES は画像添付とスレッドメタデータのみと推定。zlib 全走査で本文を
-   含む stream は見つからなかった ([findings-2026-04-26.md](./findings-2026-04-26.md) Section 3)。
-
-5. **0xFFFF 0x1F マーカー**
-   各メッセージの末尾付近に一貫して出るが、どのフィールドの delimiter なのか
-   不明
-
-## 次に試すべきこと
-
-- ✅ (実施済) 実ファイル `PlusMessage.backup` に対して `parseInbox` を単体で
-  走らせ、件数を確認 — 17 バケット、66 メッセージ (in=61, out=5)。
-  詳細: [findings-2026-04-25.md](./findings-2026-04-25.md) Section 5,
-  [findings-2026-04-26.md](./findings-2026-04-26.md) Section 6.2
-- ✅ (実施済) アンカー走査の件数確認 — 受信 61 件、送信 5 件で目視
-  期待値とほぼ一致 (送信は最古 1 件がスクショ画面外)
-- ✅ (実施済) peer marker の件数確認 — 電話番号 18 件。ただし電話番号だけを
-  探していたため、サービスアドレス 2 件 (`operator@kw.ncs.spmode.ne.jp`,
-  `docomoPlusMessagePoint@maap.plus-msg.com`) を取り逃し、operator 宛の
-  12 通が手前の電話番号バケットに混ざっていた。RS 区切りトークンを見る
-  `findAllPeerIds` に置き換えて解消 (バケット 17 → 18)。
-  詳細: [findings-2026-09-02-peers.md](./findings-2026-09-02-peers.md) Section 4
-
-残課題:
-
-- メディア配信レコードの解読 — SETTINGS には本文 66 件のほかに、画像を
-  配信したレコードが多数ある (RCS の `<file>` XML + `<file-name>`)。
-  これを読めれば画像にもタイムスタンプと送受信方向が付く
-- 0xFFFF 0x1F マーカーの解読 (P2)
-- バケットヘッダの不変量確認 (P2)
-- 1 件の送信アンカーが SETTINGS 範囲の `0x18724` 付近 (バケット 0 の
-  領域外) に出現する件の構造確認
+- 2 個目の contact blob を持つメディアレコードが 24 件、持たないものが 20 件
+  あり、`u32 × 5` の index 4 も 5 / 4 に分かれる。この分割は端末ローカル /
+  キャリアの 14 / 30 と直交していて意味が不明（Q12）
+- バケットヘッダの `+4`, `+12..+31`, ピア ID 直後の 8 バイト
+- 本文レコード末尾の u32 列。`2097151` (= 0x1FFFFF) が繰り返し現れる
+- 各レコード末尾付近に一貫して出る `0xFFFF 0x1F` マーカー（Q11）

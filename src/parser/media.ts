@@ -1,6 +1,5 @@
 import { BinaryReader } from './BinaryReader';
-import { nearestPrecedingPeer, type PeerMarker } from './inbox';
-import type { MediaHeader, Thread } from './types';
+import type { MediaDelivery, MediaHeader, Thread } from './types';
 
 /** Longest plausible file name / source path. Real values top out near 150 B. */
 const MAX_FIELD = 4096;
@@ -67,57 +66,74 @@ export function readMediaHeader(body: Uint8Array): MediaHeader | null {
 }
 
 /**
- * Attach a peer to every media record by looking its name up in SETTINGS.
+ * Join each THREAD record to the delivery that describes it.
  *
- * The media bytes carry no peer information at all — no phone number, no SIP
- * URI, no contact index. What ties a file to a conversation is its name: the
- * SETTINGS message that delivered it repeats the name, either inside the
- * RCS `<file-name>` descriptor or as the tail of the source path. Resolving
- * that occurrence against the nearest preceding peer marker gives the owner.
+ * A THREAD body carries no peer information at all — no phone number, no SIP
+ * URI, no contact index — but the SETTINGS record that delivered the file
+ * names it in its RCS descriptor, and that record sits inside the peer's own
+ * bucket. Matching {@link MediaHeader.name} against {@link MediaDelivery.name}
+ * therefore resolves the owner by lookup rather than by inference; the
+ * previous approach searched SETTINGS for the name and took the nearest
+ * preceding peer marker, which had to give up whenever a name resolved to two
+ * peers.
  *
- * A name that resolves to more than one peer is left unassigned rather than
- * guessed. On the real 65MB backup all 44 records resolve to exactly one
- * peer each (43 to one phone, 1 to the docomo service account).
+ * The name alone is not enough for files the user sent from their own device:
+ * the app appends the save time to the local copy, so the THREAD holds
+ * `IMG_20230330_174646_1681607355610.jpg` where the descriptor names
+ * `IMG_20230330_174646.jpg`. Those records do agree on the source path, so it
+ * serves as the second key.
+ *
+ * A key can also be claimed twice — the same sticker sent twice produces two
+ * deliveries and two THREAD records that agree on every field. Each delivery
+ * is therefore handed out once, in file order: across the 36 records that
+ * match unambiguously, THREAD order and delivery order agree with zero
+ * inversions, so the pairing is the one the file itself implies.
+ *
+ * The delivery's timestamp, direction and category are copied onto the
+ * attachments rather than the thread so they survive the per-peer merge in
+ * `composeThreadList`, which keeps only the flattened attachment list.
  */
-export function assignThreadPeers(
+export function attachDeliveries(
   threads: readonly Thread[],
-  settingsContent: Uint8Array,
-  peers: readonly PeerMarker[],
+  deliveries: readonly MediaDelivery[],
 ): void {
-  if (peers.length === 0) return;
-  const encoder = new TextEncoder();
-  const cache = new Map<string, string | undefined>();
+  if (deliveries.length === 0) return;
+  const byName = groupBy(deliveries, (d) => d.name);
+  const bySourcePath = groupBy(deliveries, (d) => d.sourcePath);
+  const claimed = new Set<MediaDelivery>();
+  const unclaimed = (group: MediaDelivery[] | undefined): MediaDelivery | undefined =>
+    group?.find((d) => !claimed.has(d));
 
   for (const thread of threads) {
-    const name = thread.media?.name;
-    if (!name) continue;
-    if (!cache.has(name)) {
-      cache.set(name, resolveOwner(settingsContent, encoder.encode(name), peers));
+    const media = thread.media;
+    if (!media) continue;
+    const delivery =
+      unclaimed(byName.get(media.name)) ?? unclaimed(bySourcePath.get(media.sourcePath));
+    if (!delivery) continue;
+    claimed.add(delivery);
+
+    thread.peerId = delivery.peerId;
+    for (const attachment of thread.attachments) {
+      attachment.timestamp = delivery.timestamp;
+      attachment.direction = delivery.direction;
+      attachment.category = delivery.category;
+      attachment.isSticker = delivery.isSticker;
     }
-    const owner = cache.get(name);
-    if (owner !== undefined) thread.peerId = owner;
   }
 }
 
-function resolveOwner(
-  content: Uint8Array,
-  needle: Uint8Array,
-  peers: readonly PeerMarker[],
-): string | undefined {
-  let owner: string | undefined;
-  for (let i = 0; i <= content.length - needle.length; i += 1) {
-    if (content[i] !== needle[0]) continue;
-    let matched = true;
-    for (let j = 1; j < needle.length; j += 1) {
-      if (content[i + j] !== needle[j]) { matched = false; break; }
-    }
-    if (!matched) continue;
-
-    const peer = nearestPrecedingPeer(peers, i);
-    if (peer === undefined) return undefined;
-    if (owner === undefined) owner = peer;
-    else if (owner !== peer) return undefined;
-    i += needle.length - 1;
+/** Key → every delivery carrying it, in file order. */
+function groupBy(
+  deliveries: readonly MediaDelivery[],
+  keyOf: (d: MediaDelivery) => string,
+): Map<string, MediaDelivery[]> {
+  const out = new Map<string, MediaDelivery[]>();
+  for (const delivery of deliveries) {
+    const key = keyOf(delivery);
+    if (!key) continue;
+    const group = out.get(key);
+    if (group) group.push(delivery);
+    else out.set(key, [delivery]);
   }
-  return owner;
+  return out;
 }

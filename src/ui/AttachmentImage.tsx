@@ -9,6 +9,12 @@ interface Props {
   debug?: boolean;
   onJumpToOffset?: ((offset: number) => void) | undefined;
   onOpen?: ((url: string) => void) | undefined;
+  /**
+   * 'tile' is the square, framed cell used by the attachment grid. 'bare'
+   * drops the frame and lets the image keep its own shape — how a sticker
+   * appears in the +message app, where it is not boxed like a photo.
+   */
+  variant?: 'tile' | 'bare';
 }
 
 type State =
@@ -30,7 +36,9 @@ export function AttachmentImage({
   debug = false,
   onJumpToOffset,
   onOpen,
+  variant = 'tile',
 }: Props) {
+  const bare = variant === 'bare';
   const containerRef = useRef<HTMLDivElement>(null);
   const [state, setState] = useState<State>(() => {
     const cached = getCachedBlobUrl(attachment.sourceOffset, attachment.length);
@@ -100,9 +108,9 @@ export function AttachmentImage({
     <div
       ref={containerRef}
       style={{
-        border: '1px solid var(--border)',
+        border: bare ? 'none' : '1px solid var(--border)',
         borderRadius: 8,
-        background: 'var(--bg-sunken)',
+        background: bare ? 'transparent' : 'var(--bg-sunken)',
         overflow: 'hidden',
         display: 'flex',
         flexDirection: 'column',
@@ -116,11 +124,12 @@ export function AttachmentImage({
         }}
         aria-label={ready ? '写真を拡大表示' : '写真の読み込みを待機中'}
         style={{
-          aspectRatio: '1 / 1',
+          aspectRatio: bare ? undefined : '1 / 1',
+          minHeight: bare ? 72 : undefined,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          background: 'var(--bg)',
+          background: bare ? 'transparent' : 'var(--bg)',
           border: 'none',
           padding: 0,
           cursor: canOpen ? 'zoom-in' : 'default',
@@ -130,8 +139,8 @@ export function AttachmentImage({
         {state.status === 'ready' ? (
           <img
             src={state.url}
-            alt="添付写真"
-            style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
+            alt={attachment.isSticker ? 'スタンプ' : '添付写真'}
+            style={{ maxWidth: '100%', maxHeight: bare ? 200 : '100%', objectFit: 'contain' }}
           />
         ) : state.status === 'error' ? (
           <span style={{ color: 'var(--danger, #c33)', fontSize: 11, padding: 8 }}>

@@ -9,7 +9,7 @@
 - [file-format.md](./file-format.md) — バックアップファイル全体の構造
   （プリアンブル、TLV セクション、エンドセンチネル）
 - [section-0x0001-inbox.md](./section-0x0001-inbox.md) — 「SETTINGS」セクション
-  (実体は SMS と +メッセージの送受信を統合した本文ストア) の詳細解析
+  (実体はメッセージストア本体) の詳細解析。入れ子 TLV の構造とレコード種別
 - [text-restoration.md](./text-restoration.md) — 本文復元のために試した手法と、
   何が機能して何が機能しなかったかの記録
 - [open-questions.md](./open-questions.md) — 未解決の疑問と、次に調べるべき
@@ -26,6 +26,10 @@
 - [findings-2026-09-02-peers.md](./findings-2026-09-02-peers.md) — スレッドと
   相手の紐付け。0x0006 が会話ではなくメディア 1 件だと判明し、メディア名を
   SETTINGS で逆引きして 44/44 の相手を解決。サイドバーが 61 行 → 19 行に
+- [findings-2026-09-03-settings.md](./findings-2026-09-03-settings.md) — SETTINGS
+  全体が入れ子 TLV だと判明。バイト列走査を構造パースに置き換え、**受信
+  +メッセージ 45 通の取りこぼし**（本文 66 → 112 通）を解消し、メディア 44 件に
+  日時・方向・スタンプ判別が付いた。UI は本文と画像を 1 本の時系列に統合
 
 ## 検証スクリプト
 
@@ -39,8 +43,9 @@
   ヒット箇所をセクション情報付きで hexdump 表示
 - `pnpm tsx scripts/scan-zlib.ts ./PlusMessage.backup` — 全 thread body の
   zlib stream を列挙し、attachment 既知範囲外を hexdump でプレビュー
-- `pnpm tsx scripts/scan-thread-peers.ts ./PlusMessage.backup` — メディア
-  レコードの相手を SETTINGS 逆引きで解決し、サイドバーに出る会話一覧を出力
+- `pnpm tsx scripts/scan-settings.ts ./PlusMessage.backup` — SETTINGS を入れ子
+  TLV として辿り、枠組みがバイト単位で閉じることの確認、バケット宣言件数との
+  突き合わせ、方向 × 経路の内訳、メディア配信と THREAD の結合率を出力
 
 ## サンプル値について
 

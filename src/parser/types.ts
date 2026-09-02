@@ -74,6 +74,12 @@ export interface Attachment {
  *
  * `decompressedLength` is the size the UI should expect after decoding
  * (equals `length` for raw attachments).
+ *
+ * `timestamp`, `direction`, `category` and `isSticker` are copied from the
+ * matching {@link MediaDelivery} so the detail pane can interleave images
+ * with text in one timeline. They live on the attachment rather than on the
+ * thread because `composeThreadList` merges a peer's THREAD records into one
+ * row and keeps only the flattened attachment list.
  */
 export interface AttachmentRef {
   kind: 'image/jpeg' | 'image/png' | 'image/gif' | 'unknown';
@@ -82,6 +88,65 @@ export interface AttachmentRef {
   length: number;
   encoding: 'raw' | 'zlib';
   decompressedLength?: number;
+  timestamp?: { ms: number; iso: string };
+  direction?: 'incoming' | 'outgoing';
+  category?: string;
+  isSticker?: boolean;
+}
+
+/**
+ * One media file as the conversation recorded it — the counterpart of a
+ * THREAD (0x0006) record. THREAD stores the bytes; this stores when the file
+ * was sent, by which side, and what the app considered it to be.
+ *
+ * Decoded from a SETTINGS conversation record with `A = 4`. `name` is the
+ * join key: it equals {@link MediaHeader.name} on the THREAD record holding
+ * the bytes.
+ */
+export interface MediaDelivery {
+  name: string;
+  peerId: string;
+  timestamp: { ms: number; iso: string };
+  direction: 'incoming' | 'outgoing';
+  /** Content type of the full-size file, from the RCS `<file>` descriptor. */
+  contentType: string;
+  /** Raw category string, e.g. `image/png|basic-sticker` or `image/jpeg`. */
+  category: string;
+  /** True when `category` marks the file a sticker rather than a photo. */
+  isSticker: boolean;
+  /** `0,`-prefixed source locator; also what `direction` is derived from. */
+  sourcePath: string;
+  /** Full-size byte count declared by the RCS descriptor, when present. */
+  fileSize?: number;
+  /** When the carrier's copy of the asset expires (`until=` in the XML). */
+  expiresAt?: { ms: number; iso: string };
+  offset: number;
+  length: number;
+}
+
+/**
+ * One peer bucket (0x0002) of SETTINGS, with its records already decoded.
+ * Buckets appear in ascending peer-id order and every message in the backup
+ * belongs to exactly one of them.
+ */
+export interface SettingsPeer {
+  peerId: string;
+  /** Display name from the record's contact blob, when the app stored one. */
+  displayName?: string;
+  messages: InboxMessage[];
+  media: MediaDelivery[];
+  /**
+   * Records whose variant tag is neither text nor media. The real backup has
+   * one: the docomo official account's bot definition (`isbot true`), which
+   * is a service description rather than a message. Counted so a caller can
+   * reconcile against `declared.records` without mistaking it for a decode
+   * failure — see Q13 in docs/open-questions.md.
+   */
+  unknownRecords: number;
+  /** Record counts declared by the bucket header, for cross-checking. */
+  declared: { records: number; media: number };
+  offset: number;
+  length: number;
 }
 
 export interface Message {
@@ -111,10 +176,10 @@ export interface Message {
  *   [u32 LE: sipLen][sip metadata string]
  *   [40B trailer including a repeat of the timestamp]
  *
- * Direction can't be recovered from this backup — every SIP From/To is
- * `<sip:anonymous@anonymous.invalid>` and the pipe-delimited flags are
- * constant `1|1|0|`. We default to 'unknown' and let the UI treat the whole
- * list as received messages for now.
+ * Direction and transport both come from the record header, not from the SIP
+ * metadata (every SIP From/To in this backup is
+ * `<sip:anonymous@anonymous.invalid>`): the `kind` field is 7 for received
+ * and 6 for sent, and the `route` field is 5 for SMS and 4 for +message.
  */
 export interface InboxMessage {
   id: string;
@@ -123,6 +188,8 @@ export interface InboxMessage {
   mimeType: string;
   timestamp: { ms: number; iso: string };
   direction: 'incoming' | 'outgoing' | 'unknown';
+  /** Which channel carried the message. */
+  transport: 'sms' | 'rcs' | 'unknown';
   sipMetadata: string;
   offset: number;
   length: number;
@@ -180,6 +247,12 @@ export interface Backup {
   inbox?: InboxBucket[];
   /** Display names recovered from SETTINGS, keyed by peer id. */
   peerNames: Record<string, string>;
+  /**
+   * Every media delivery SETTINGS describes, in file order. Not carried into
+   * {@link BackupSummary} — the UI consumes it through the attachment fields
+   * it populates — but analysis scripts read it directly.
+   */
+  mediaDeliveries: MediaDelivery[];
   threads: Thread[];
   sections: RawChunk[];
   unknownSections: RawChunk[];
