@@ -28,7 +28,7 @@
 - ✅ **UI で送受信が区別表示される** — `InboxBubble` を direction で
   分岐させ、送信は右寄せ + accent カラー、受信は左寄せ + accent-weak。
   時系列ソートも `ThreadDetail` 側で `timestamp.ms` 昇順に実施済み。
-  ブラウザで最終確認済み (`.playwright-mcp/outgoing-bubbles-around-why.png`)。
+  ブラウザで最終確認済み。
 - ❌ 44 実 thread の `peerPhone` は全件 undefined。SMS / +メッセージの
   本文は SETTINGS から取れているが、MESSAGES 側の thread (画像メイン) と
   「同じ相手」として統合できていない (Q4 / B タスク)
