@@ -37,7 +37,7 @@ offset  size  内容
 |--------|------------|-------------------------|------------|
 | 0x0001 | SETTINGS   | **実体は SMS 受信箱**   | 部分的（後述） |
 | 0x0005 | MESSAGES   | スレッドコンテナ         | ✅ |
-| 0x0006 | THREAD     | 単一スレッド             | ヘッダのみ |
+| 0x0006 | THREAD     | メディア 1 件（会話ではない） | ✅ |
 | 0x0008 | END        | セクション終端センチネル | ✅ |
 | 0x000b | META       | KV ペアのバックアップ設定 | ✅ |
 | 0x000d | CONTACTS   | 連絡先帳                | ✅ |
@@ -103,19 +103,35 @@ MESSAGES.content:
 
 THREAD.content:
   +0      u32 threadId          — 1 起点の連番
-  +4      u8  flag              — 0x00 または 0x01 を観測
+  +4      u8  flag              — 0=端末ローカルのファイル / 1=サーバから DL
   +5      u16 padding           — 常に 0x0000
-  +7      u32 sizeField         — 圧縮前サイズと思われるが未確定
-  +11     ...  body              — ここから後が本番。未解析
+  +7      u32 sizeField         — デコード後のバイト数
+                                  （生 JPEG は格納長そのもの、zlib 包みは展開後）
+  +11     ...  body
+
+THREAD.body:
+  +0      u32 nameLen / name    — DL 資材は UUID、送信画像は元ファイル名
+  ...     u32 pathLen / path    — `0,` 接頭辞つきの取得元
+  ...     u32 mimeLen / mime    — image/jpeg | image/png | image/gif
+  ...     u16 0x0007            — 用途不明のタグ。全 44 件で同値
+  ...     u32 × 2〜3            — サイズ群（JPEG は 2 個、zlib 包みは 3 個）
+  ...     ...                   — 画像バイト列（生 JPEG または zlib stream）
 ```
 
-body 内部には次が混在する（完全な構造は未判明）:
+**THREAD は会話ではなくメディア 1 件**。名前のとおりのスレッドではなく、
+写真・スタンプ 1 ファイル分の格納単位で、相手を示す情報を一切持たない
+（実ファイル 44 件すべてで電話番号・SIP URI ともに 0 バイト）。
 
-- JPEG 画像（`FF D8 FF … FF D9` で検出可能。現パーサで抽出済み）
-- zlib 圧縮された PNG（`0x78` + チェックサム通過で検出。現パーサで抽出済み）
-- UUID や URL、MIME type 等の長さ接頭辞付き ASCII メタ
-- バイナリの長さ・タイムスタンプ・フラグフィールド群（未分解）
-- **本文テキスト** — JP/EN が混在。**どこにどう格納されているかは未判明**
+相手は `name` を SETTINGS 側で逆引きして解決する。詳細は
+[findings-2026-09-02-peers.md](./findings-2026-09-02-peers.md)。
+
+観測された `path` の 3 系統:
+
+| 系統 | 例 | flag |
+|---|---|---|
+| キャリアの資材サーバ | `0,https://a-wss.kw.ncs.spmode.ne.jp/wss-core//rest/resource/…` | 1 |
+| iOS フォトライブラリ | `0,app://photos-kit/<uuid>/L0/001/RESIZE` | 0 |
+| アプリのサンドボックス | `0,/var/mobile/Containers/Data/Application/…/tmp/IMG_….jpg` | 0 |
 
 コード: [src/parser/sections.ts](../src/parser/sections.ts:220) の `parseThread`
 

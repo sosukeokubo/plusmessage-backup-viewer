@@ -23,6 +23,9 @@
 - [findings-2026-09-02.md](./findings-2026-09-02.md) — zlib 包み GIF 添付の
   検出対応。`scanPngZlib` を `scanZlibImages` に一般化し、添付を 32 → 44 件に。
   「画像なし」に見えていた 12 会話の正体は +メッセージのスタンプだった
+- [findings-2026-09-02-peers.md](./findings-2026-09-02-peers.md) — スレッドと
+  相手の紐付け。0x0006 が会話ではなくメディア 1 件だと判明し、メディア名を
+  SETTINGS で逆引きして 44/44 の相手を解決。サイドバーが 61 行 → 19 行に
 
 ## 検証スクリプト
 
@@ -36,6 +39,8 @@
   ヒット箇所をセクション情報付きで hexdump 表示
 - `pnpm tsx scripts/scan-zlib.ts ./PlusMessage.backup` — 全 thread body の
   zlib stream を列挙し、attachment 既知範囲外を hexdump でプレビュー
+- `pnpm tsx scripts/scan-thread-peers.ts ./PlusMessage.backup` — メディア
+  レコードの相手を SETTINGS 逆引きで解決し、サイドバーに出る会話一覧を出力
 
 ## 前提知識
 

@@ -1,5 +1,5 @@
 import { BinaryReader } from './BinaryReader';
-import { TLV_HEADER_SIZE } from './constants';
+import { GS, RS, TLV_HEADER_SIZE } from './constants';
 import type { InboxBucket, InboxMessage, TlvRecord } from './types';
 
 const utf8 = new TextDecoder('utf-8', { fatal: false });
@@ -44,20 +44,20 @@ export interface AnchorHit {
  * Parse the SETTINGS-typed section as an SMS inbox store.
  *
  * Strategy: scan the entire section content in two passes.
- *   1. Collect every occurrence of a length-prefixed ASCII `+`-phone number.
+ *   1. Collect every peer identity marker (see {@link findAllPeerIds}).
  *   2. Collect every MESSAGE_ANCHOR occurrence, parse the message record
- *      starting at each, and associate it with the nearest preceding phone.
+ *      starting at each, and associate it with the nearest preceding peer.
  *
  * This avoids fragile assumptions about the outer bucket framing (which has
  * a few unidentified length fields) — we only care about message offsets and
- * peer identity. Messages sharing a phone are grouped into one InboxBucket.
+ * peer identity. Messages sharing a peer are grouped into one InboxBucket.
  */
 export function parseInbox(rec: TlvRecord): InboxBucket[] {
   const content = rec.content;
   if (content.length < MESSAGE_ANCHOR.length) return [];
   const baseOffset = rec.offset + TLV_HEADER_SIZE;
 
-  const phones = findAllPeerPhones(content);
+  const peers = findAllPeerIds(content);
   const anchors = findAllAnchors(content);
   if (anchors.length === 0) return [];
 
@@ -66,16 +66,16 @@ export function parseInbox(rec: TlvRecord): InboxBucket[] {
     firstOffset: number;
     lastOffset: number;
   };
-  const byPhone = new Map<string, Accum>();
+  const byPeer = new Map<string, Accum>();
 
   for (const anchor of anchors) {
-    const peerPhone = nearestPrecedingPhone(phones, anchor.offset) ?? '';
-    const parsed = readMessage(content, anchor, peerPhone, baseOffset);
+    const peerId = nearestPrecedingPeer(peers, anchor.offset) ?? '';
+    const parsed = readMessage(content, anchor, peerId, baseOffset);
     if (!parsed) continue;
 
-    const key = peerPhone;
+    const key = peerId;
     const endOffset = parsed.message.offset + parsed.message.length;
-    const existing = byPhone.get(key);
+    const existing = byPeer.get(key);
     if (existing) {
       existing.messages.push(parsed.message);
       if (parsed.message.offset < existing.firstOffset) {
@@ -83,7 +83,7 @@ export function parseInbox(rec: TlvRecord): InboxBucket[] {
       }
       if (endOffset > existing.lastOffset) existing.lastOffset = endOffset;
     } else {
-      byPhone.set(key, {
+      byPeer.set(key, {
         messages: [parsed.message],
         firstOffset: parsed.message.offset,
         lastOffset: endOffset,
@@ -92,9 +92,9 @@ export function parseInbox(rec: TlvRecord): InboxBucket[] {
   }
 
   const buckets: InboxBucket[] = [];
-  for (const [peerPhone, accum] of byPhone) {
+  for (const [peerId, accum] of byPeer) {
     buckets.push({
-      peerPhone,
+      peerId,
       messages: accum.messages,
       offset: accum.firstOffset,
       length: accum.lastOffset - accum.firstOffset,
@@ -111,7 +111,7 @@ interface MessageParseResult {
 function readMessage(
   buf: Uint8Array,
   anchor: AnchorHit,
-  peerPhone: string,
+  peerId: string,
   sectionBaseOffset: number,
 ): MessageParseResult | null {
   const start = anchor.offset;
@@ -144,7 +144,7 @@ function readMessage(
     const end = r.offset;
     const message: InboxMessage = {
       id: utf8.decode(uuidBytes),
-      peerPhone,
+      peerId,
       text,
       mimeType,
       timestamp: { ms: tsMs, iso },
@@ -181,70 +181,113 @@ function collectAnchorOffsets(content: Uint8Array, anchor: Uint8Array): number[]
   return hits;
 }
 
-export interface PhoneMarker {
+export interface PeerMarker {
   offset: number;
-  phone: string;
+  peerId: string;
+}
+
+const PEER_ID_MIN = 3;
+const PEER_ID_MAX = 80;
+
+/** `+` followed by 8–15 digits, or a `local@domain` service address. */
+function isPeerId(token: string): boolean {
+  if (/^\+\d{8,15}$/.test(token)) return true;
+  return /^[^\s@]{1,64}@[A-Za-z0-9.-]{3,64}$/.test(token);
 }
 
 /**
- * Find every length-prefixed `+`-phone in the content. Phones are stored as
- * u32-length + ASCII digits; typical Japanese mobile is 13 bytes (`+81…`).
- * Several copies appear per bucket (once as the peer identity, several inside
- * the contact blob). We keep them all and later resolve by nearest-preceding.
+ * Find every peer identity marker in the SETTINGS content.
+ *
+ * A peer identity closes its contact blob as an RS-delimited token
+ * (`0x1e <id> 0x1e`) — verified on the real 65MB backup, where this yields
+ * exactly 20 distinct ids: 18 `+81…` phones plus the two service addresses
+ * `operator@kw.ncs.spmode.ne.jp` and
+ * `docomoPlusMessagePoint@maap.plus-msg.com`.
+ *
+ * The earlier phone-only scan (u32-length + `+digits`) missed both service
+ * addresses, so their 12 messages were charged to the preceding phone bucket.
+ * Everything downstream resolves a peer by nearest-preceding marker, so a
+ * missing marker silently misattributes an entire bucket.
  */
-export function findAllPeerPhones(content: Uint8Array): PhoneMarker[] {
-  const out: PhoneMarker[] = [];
-  const n = content.length;
-  let i = 0;
-  while (i + 4 < n) {
-    const len = readU32LE(content, i);
-    if (len < 8 || len > 20) {
-      i += 1;
-      continue;
+export function findAllPeerIds(content: Uint8Array): PeerMarker[] {
+  const out: PeerMarker[] = [];
+  for (let i = 0; i < content.length; i += 1) {
+    if (content[i] !== RS) continue;
+    let j = i + 1;
+    while (j < content.length && j - i - 1 <= PEER_ID_MAX) {
+      const b = content[j]!;
+      if (b === RS) break;
+      if (b < 0x20 || b > 0x7e) break;
+      j += 1;
     }
-    const startAt = i + 4;
-    if (startAt + len > n) {
-      i += 1;
-      continue;
-    }
-    if (content[startAt] !== 0x2b /* '+' */) {
-      i += 1;
-      continue;
-    }
-    let allDigits = true;
-    for (let k = 1; k < len; k += 1) {
-      const b = content[startAt + k]!;
-      if (b < 0x30 || b > 0x39) { allDigits = false; break; }
-    }
-    if (!allDigits) {
-      i += 1;
-      continue;
-    }
-    out.push({
-      offset: i,
-      phone: utf8.decode(content.subarray(startAt, startAt + len)),
-    });
-    i = startAt + len;
+    const len = j - i - 1;
+    if (len < PEER_ID_MIN || len > PEER_ID_MAX) continue;
+    if (content[j] !== RS) continue;
+    const token = utf8.decode(content.subarray(i + 1, j));
+    if (!isPeerId(token)) continue;
+    out.push({ offset: i, peerId: token });
   }
   return out;
 }
 
-function nearestPrecedingPhone(phones: readonly PhoneMarker[], target: number): string | undefined {
+export function nearestPrecedingPeer(peers: readonly PeerMarker[], target: number): string | undefined {
   let best: string | undefined;
-  for (const p of phones) {
+  for (const p of peers) {
     if (p.offset > target) break;
-    best = p.phone;
+    best = p.peerId;
   }
   return best;
 }
 
-function readU32LE(buf: Uint8Array, offset: number): number {
-  return (
-    (buf[offset]! |
-      (buf[offset + 1]! << 8) |
-      (buf[offset + 2]! << 16) |
-      (buf[offset + 3]! << 24)) >>> 0
-  );
+/** `GS t e l GS` — the channel tag that precedes the peer's number. */
+const TEL_TAG = new Uint8Array([GS, 0x74, 0x65, 0x6c, GS]);
+
+/**
+ * Recover display names from the contact blobs embedded in message records.
+ *
+ * The blob is GS-delimited as `0 GS "" GS <name> GS tel GS <phone> GS …`, so
+ * the field right before the `tel` tag is the display name. The same blob is
+ * repeated on every message, and the name is not always filled in, so we take
+ * the most frequent non-empty spelling per peer.
+ *
+ * The CONTACTS section (0x000d) carries the same field shape but leaves the
+ * name empty for all 85 entries on the real backup — SETTINGS is the only
+ * place a name survives.
+ */
+export function extractPeerNames(content: Uint8Array): Record<string, string> {
+  const tally = new Map<string, Map<string, number>>();
+  let from = 0;
+  for (;;) {
+    const at = indexOfBytes(content, TEL_TAG, from);
+    if (at < 0) break;
+    from = at + TEL_TAG.length;
+
+    let end = from;
+    while (end < content.length && content[end] !== GS) end += 1;
+    const phone = utf8.decode(content.subarray(from, end));
+    if (!/^\+\d{8,15}$/.test(phone)) continue;
+
+    let start = at - 1;
+    while (start >= 0 && content[start] !== GS) start -= 1;
+    if (start < 0) continue;
+    const name = utf8.decode(content.subarray(start + 1, at)).trim();
+    if (!name) continue;
+
+    const counts = tally.get(phone) ?? new Map<string, number>();
+    counts.set(name, (counts.get(name) ?? 0) + 1);
+    tally.set(phone, counts);
+  }
+
+  const out: Record<string, string> = {};
+  for (const [phone, counts] of tally) {
+    let best = '';
+    let bestCount = 0;
+    for (const [name, count] of counts) {
+      if (count > bestCount) { best = name; bestCount = count; }
+    }
+    if (best) out[phone] = best;
+  }
+  return out;
 }
 
 function indexOfBytes(haystack: Uint8Array, needle: Uint8Array, from: number): number {

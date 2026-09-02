@@ -17,7 +17,7 @@ import { resolve } from 'node:path';
 import { parseBackup, summarizeBackup } from '../src/parser';
 import {
   buildContactIndex,
-  normalizePhone,
+  normalizePeerId,
   resolveThreadContact,
 } from '../src/util/contactResolver';
 import { buildInboxIndex, composeThreadList } from '../src/util/inboxIndex';
@@ -43,7 +43,8 @@ function main(): void {
   const composed = composeThreadList(summary.threads, summary.inbox);
 
   const realCount = summary.threads.length;
-  const virtualCount = composed.length - realCount;
+  const virtualCount = composed.filter((t) => t.id.startsWith('inbox:')).length;
+  const mergedCount = composed.length - virtualCount;
   const inboxBuckets = summary.inbox?.length ?? 0;
   const totalInboxMessages = (summary.inbox ?? []).reduce(
     (acc, b) => acc + b.messages.length,
@@ -54,7 +55,7 @@ function main(): void {
   console.log(`  summary.threads:         ${realCount}`);
   console.log(`  summary.inbox buckets:   ${inboxBuckets}`);
   console.log(`  inbox messages total:    ${totalInboxMessages}`);
-  console.log(`  composed threads:        ${composed.length} (real ${realCount} + virtual ${virtualCount})`);
+  console.log(`  composed threads:        ${composed.length} (${mergedCount} from ${realCount} media records + ${virtualCount} inbox-only)`);
   console.log(`  inboxIndex keys:         ${inboxIndex.size}`);
   console.log('');
 
@@ -64,8 +65,8 @@ function main(): void {
   let virtualWithInbox = 0;
   for (let i = 0; i < composed.length; i += 1) {
     const t = composed[i]!;
-    const contact = resolveThreadContact(t, contactIndex, i);
-    const key = t.peerPhone ? normalizePhone(t.peerPhone) : '';
+    const contact = resolveThreadContact(t, contactIndex, i, summary.peerNames);
+    const key = t.peerId ? normalizePeerId(t.peerId) : '';
     const inbox = key ? inboxIndex.get(key) : undefined;
     const inboxCount = inbox?.length ?? 0;
     const isVirtual = t.id.startsWith('inbox:');
@@ -75,7 +76,7 @@ function main(): void {
       else realWithInbox += 1;
     }
     const flag = isVirtual ? 'V' : 'R';
-    const phone = t.peerPhone ?? '-';
+    const phone = t.peerId ?? '-';
     const name = truncate(contact.displayName, 28);
     console.log(
       `  [${i.toString().padStart(3)}] ${flag}  msgs=${inboxCount.toString().padStart(3)}  name="${name.padEnd(28)}" peer=${phone}`,
@@ -92,8 +93,8 @@ function main(): void {
 
   const unmatchedPhones = new Set(inboxIndex.keys());
   for (const t of composed) {
-    if (!t.peerPhone) continue;
-    unmatchedPhones.delete(normalizePhone(t.peerPhone));
+    if (!t.peerId) continue;
+    unmatchedPhones.delete(normalizePeerId(t.peerId));
   }
   if (unmatchedPhones.size > 0) {
     console.log('## Inbox phones that never reach the sidebar (BUG if > 0)');

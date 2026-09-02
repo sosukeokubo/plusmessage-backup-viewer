@@ -36,6 +36,24 @@ export interface Contact {
   tail: Uint8Array;
 }
 
+/**
+ * Metadata that opens a THREAD (0x0006) body — see `readMediaHeader` in
+ * media.ts for the byte layout.
+ */
+export interface MediaHeader {
+  /** Resource UUID for downloaded content, or the original file name. */
+  name: string;
+  /** `0,`-prefixed source locator: an https URL, `app://photos-kit/…`, or a path. */
+  sourcePath: string;
+  contentType: string;
+  /**
+   * Bytes consumed by the three text fields. The 0x0007 tag and the size
+   * fields still follow before the image bytes, so this is not the payload
+   * offset — attachments are located by signature scan, not from here.
+   */
+  headerLength: number;
+}
+
 export interface Attachment {
   kind: 'image/jpeg' | 'image/png' | 'image/gif' | 'unknown';
   stored: Uint8Array;
@@ -100,7 +118,7 @@ export interface Message {
  */
 export interface InboxMessage {
   id: string;
-  peerPhone: string;
+  peerId: string;
   text: string;
   mimeType: string;
   timestamp: { ms: number; iso: string };
@@ -110,17 +128,29 @@ export interface InboxMessage {
   length: number;
 }
 
+/**
+ * Messages grouped by peer. `peerId` is a `+81…` phone for a person, or a
+ * service address such as `operator@kw.ncs.spmode.ne.jp` for carrier
+ * notifications and the docomo official account.
+ */
 export interface InboxBucket {
-  peerPhone: string;
+  peerId: string;
   messages: InboxMessage[];
   offset: number;
   length: number;
 }
 
+/**
+ * One THREAD (0x0006) record. Despite the name this is a single stored media
+ * file, not a conversation — the peer it belongs to is recovered afterwards
+ * by looking `media.name` up in SETTINGS (see `assignThreadPeers`).
+ */
 export interface Thread {
   id: string;
   threadId: number;
-  peerPhone?: string;
+  peerId?: string;
+  /** File name / source / MIME decoded from the head of the body. */
+  media?: MediaHeader;
   isGroup: boolean;
   messageCount: number;
   messages: Message[];
@@ -148,6 +178,8 @@ export interface Backup {
   contacts: Contact[];
   settings?: RawChunk;
   inbox?: InboxBucket[];
+  /** Display names recovered from SETTINGS, keyed by peer id. */
+  peerNames: Record<string, string>;
   threads: Thread[];
   sections: RawChunk[];
   unknownSections: RawChunk[];
@@ -193,7 +225,8 @@ export interface ContactSummary {
 export interface ThreadSummary {
   id: string;
   threadId: number;
-  peerPhone?: string;
+  peerId?: string;
+  media?: MediaHeader;
   isGroup: boolean;
   messageCount: number;
   raw: RawChunkSummary;
@@ -210,6 +243,7 @@ export interface BackupSummary {
   contacts: ContactSummary[];
   settings?: RawChunkSummary;
   inbox?: InboxBucket[];
+  peerNames: Record<string, string>;
   threads: ThreadSummary[];
   sections: RawChunkSummary[];
   unknownSections: RawChunkSummary[];

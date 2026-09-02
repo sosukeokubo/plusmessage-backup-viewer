@@ -38,6 +38,10 @@ accent-weak で表示され、`ThreadDetail` の `useMemo` 経由で時系列ソ
 (0x1e7d5–0x3e242b3) では 0 件。zlib 全走査でも本文を含む stream は無し。
 詳細: [findings-2026-04-26.md](./findings-2026-04-26.md) Section 1, 3。
 
+**補足 (2026-09-02):** 「スレッドメタデータの格納先」という推定は不正確だった。
+MESSAGES にあるのはメディアファイルそのもの（名前・取得元・MIME・画像バイト列）
+だけで、スレッドという概念自体が存在しない。Q2 / Q4 を参照。
+
 ### Q5. 送受信方向の復元
 
 **回答 (2026-04-26):** **アンカー 1 バイトで判別可能**。
@@ -54,52 +58,40 @@ accent-weak で表示され、`ThreadDetail` の `useMemo` 経由で時系列ソ
 に追加すれば既存の readMessage で読める。
 詳細: [findings-2026-04-26.md](./findings-2026-04-26.md)。
 
-## P0: これが分からないと先に進めない
-
 ### Q2. 会話 1〜61 とは実際には何か
 
-**なぜ重要:** Q1 解決によって 44 + 17 = 61 と判明。
-44 は MESSAGES 側の thread、17 は SMS 受信箱バケット。
-ただし 44 thread と 17 bucket が同じ相手に対して重複している可能性は
-未確定。Q4 と密接に関連。
+**回答 (2026-09-02):** 61 は会話数ではない。**44 は MESSAGES 側のメディア
+1 件ずつ**（写真・スタンプのファイル格納単位で、会話ではない）、17 は
+SETTINGS の SMS バケット。Q4 の紐付けを入れた後の実際の会話数は **19**。
+詳細: [findings-2026-09-02-peers.md](./findings-2026-09-02-peers.md) Section 2。
 
-**検証方法:**
-- 各 thread の `body` の先頭数百バイトを hexdump
-- 同じ相手が複数スレッドに分散していないか（たとえば写真 1 枚 = 1 スレッド？
-  会話の論理区切りで分かれている？）
-- Q4 (peerPhone 解決) が解けると自動的に答えが出る
+### Q4. スレッドと相手の電話番号の紐付け
 
-## P1: 復元品質に直結
+**回答 (2026-09-02):** thread body に電話番号は **1 バイトも無い**
+（当初の検証方法は空振り）。THREAD がメディア 1 件だからで、相手は
+**メディア名を SETTINGS 側で逆引き**して解決する。実ファイルで 44/44 が
+一意に解決した（43 件が `+819012340001`、1 件が docomo 公式アカウント）。
 
-### Q4. スレッドと相手の電話番号の紐付け（昇格: 旧 P1 → 現実質 P0）
-
-**なぜ重要:** 現在、44 実 thread すべての `peerPhone` が undefined。
-SMS 側で 17 件は phone 紐付き、MESSAGES 側 44 件は紐付かずに分離して
-表示されている。これが解けると、SMS と +メッセージが「同じ相手の会話」
-として 1 つに統合できる。Q3 (MESSAGES 本文) より小さく早く価値が出る
-可能性が高い。
-
-**検証方法:**
-- 各 thread body から長さ接頭辞付き `+`-phone を探す
-  （inbox.ts の `findAllPeerPhones` をそのまま転用可能）
-- 1 thread あたり何個の phone が出るか、最頻出が peer 候補か検証
-- `CONTACTS` セクションの phone (85 件) と thread の順序・インデックスに
-  対応があるか確認 (CONTACTS 85 ≠ THREAD 44 なので 1:1 ではない)
-- thread header の `sizeField` や `flag` に電話番号への参照が埋まって
-  いないか
+peer 識別子は RS 区切りトークン (`0x1e <id> 0x1e`) で、電話番号 18 件に加えて
+`operator@kw.ncs.spmode.ne.jp` と `docomoPlusMessagePoint@maap.plus-msg.com`
+の 2 件がある。旧 `findAllPeerPhones` はこの 2 件を取り逃しており、
+**operator 宛の 12 通が別の電話番号の会話として表示されていた**（修正済み）。
+詳細: [findings-2026-09-02-peers.md](./findings-2026-09-02-peers.md)。
 
 ### Q4-bis. 連絡先の名前抽出 (deriveContactName) は実データで動くか
 
-**なぜ重要:** 連絡先 85 件すべてで `name === undefined` が出ている
-([findings-2026-04-25.md](./findings-2026-04-25.md) Section 3)。
-そのため、Q4 で peer phone が解けても表示名は電話番号のまま。
+**回答 (2026-09-02):** CONTACTS 85 件には**本当に名前が入っていない**
+（正規表現の弾きすぎではない）。名前は SETTINGS のメッセージに埋まった
+contact blob 側にあり、`GS <表示名> GS tel GS <番号> GS` の形で取り出せる。
+実データで名前が付くのは 2 件のみ（`花子` / `山田太郎`）。
+`extractPeerNames` として実装済み。
 
-**検証方法:**
-- 数件の Contact について `fields` と `otherRecords` を hexdump
-  含めて目視
-- 名前データが本当に入っていないのか、`PHONE_LIKE` 正規表現で
-  弾きすぎているのかを切り分け
-- 入っていないのが確定なら、以降ここに時間をかけない
+### Q9. THREAD header の `flag` と `sizeField`
+
+**回答 (2026-09-02):** `flag` = 0 が端末ローカルのファイル（iOS フォト
+ライブラリ / アプリ sandbox）、1 がキャリアの資材サーバから DL したもの。
+`sizeField` = デコード後のバイト数（生 JPEG は格納長そのもの、zlib 包みの
+PNG/GIF は展開後サイズ）。
 
 ## P2: 解けなくても致命的ではない
 
@@ -112,11 +104,6 @@ SMS 側で 17 件は phone 紐付き、MESSAGES 側 44 件は紐付かずに分�
 
 **検証方法:** 「お気に入り」「ブロック」等のフラグがある連絡先を
 片っ端から比較。
-
-### Q9. THREAD header の `flag` と `sizeField`
-
-**検証方法:** `flag=0x00` と `flag=0x01` の thread を hexdump で比較。
-`sizeField` と実 body 長との関係（比率、差分）を統計的に。
 
 ### Q10. SETTINGS peer bucket の `0x00000039` の意味
 
@@ -141,9 +128,9 @@ SMS 側で 17 件は phone 紐付き、MESSAGES 側 44 件は紐付かずに分�
 - ✅ **`scripts/scan-zlib.ts`** — 全 44 thread body から zlib stream を
   列挙し、attachment 範囲外で本文らしき UTF-8 が出るかを試行。
   Q3 (仮説 B 否定) に使用。
-- ⏳ **`scripts/scan-thread-phones.ts`** — 全 thread body を
-  `findAllPeerPhones` で走査し、thread あたりの phone 出現分布を出す。
-  Q4 で必要。
+- ✅ **`scripts/scan-thread-peers.ts`** — thread body に電話番号が無いことを
+  示したうえで、メディア名 → SETTINGS 逆引き → peer の解決結果と、
+  サイドバーに出る会話一覧を出力する。Q2 / Q4 / Q4-bis 解決に使用。
 - ⏳ **`scripts/diff-backups.ts`** — 複数バックアップの同じセクションを
   並べて差分する（プリアンブル解析や tail 解析に使う）。Q7/Q8 で必要。
 

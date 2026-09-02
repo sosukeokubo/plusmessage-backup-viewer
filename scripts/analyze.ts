@@ -19,7 +19,7 @@ import {
   ANCHOR_INCOMING,
   ANCHOR_OUTGOING,
   findAllAnchors,
-  findAllPeerPhones,
+  findAllPeerIds,
 } from '../src/parser/inbox';
 
 const SECTION_NAMES: Record<number, string> = {
@@ -118,17 +118,17 @@ function main(): void {
       console.log(`  first 5 anchor offsets:  ${sample}`);
     }
 
-    const phones = findAllPeerPhones(content);
-    const phoneCounts = new Map<string, number>();
-    for (const p of phones) {
-      phoneCounts.set(p.phone, (phoneCounts.get(p.phone) ?? 0) + 1);
+    const peers = findAllPeerIds(content);
+    const peerCounts = new Map<string, number>();
+    for (const p of peers) {
+      peerCounts.set(p.peerId, (peerCounts.get(p.peerId) ?? 0) + 1);
     }
-    const uniquePhones = [...phoneCounts.entries()].sort((a, b) => b[1] - a[1]);
-    console.log(`  phone markers (total):   ${phones.length}`);
-    console.log(`  phone markers (unique):  ${uniquePhones.length}`);
-    console.log(`  top 10 phones by count:`);
-    for (const [phone, count] of uniquePhones.slice(0, 10)) {
-      console.log(`    ${count.toString().padStart(3)} × ${phone}`);
+    const uniquePeers = [...peerCounts.entries()].sort((a, b) => b[1] - a[1]);
+    console.log(`  peer markers (total):    ${peers.length}`);
+    console.log(`  peer markers (unique):   ${uniquePeers.length}`);
+    console.log(`  top 10 peers by count:`);
+    for (const [peerId, count] of uniquePeers.slice(0, 10)) {
+      console.log(`    ${count.toString().padStart(3)} × ${peerId}`);
     }
   }
   console.log('');
@@ -152,14 +152,14 @@ function main(): void {
     for (let i = 0; i < sorted.length; i += 1) {
       const b = sorted[i]!;
       const first = b.messages[0];
-      const phone = b.peerPhone || '(no phone)';
+      const peer = b.peerId || '(no peer)';
       const firstIso = first?.timestamp.iso ?? '';
       const firstText = first ? truncate(first.text.replace(/\n/g, '⏎'), 40) : '';
       const mime = first?.mimeType ?? '';
       const inCount = b.messages.filter((m) => m.direction === 'incoming').length;
       const outCount = b.messages.filter((m) => m.direction === 'outgoing').length;
       const dirLabel = `in=${inCount.toString().padStart(2)} out=${outCount.toString().padStart(2)}`;
-      console.log(`    [${i}] phone=${phone.padEnd(16)} msgs=${b.messages.length.toString().padStart(3)} ${dirLabel} first=${firstIso.slice(0, 19)}  mime=${mime}`);
+      console.log(`    [${i}] peer=${peer.padEnd(44)} msgs=${b.messages.length.toString().padStart(3)} ${dirLabel} first=${firstIso.slice(0, 19)}  mime=${mime}`);
       if (firstText) {
         console.log(`         text: ${firstText}`);
       }
@@ -171,7 +171,7 @@ function main(): void {
   for (let i = 0; i < backup.threads.length; i += 1) {
     const t = backup.threads[i]!;
     console.log(
-      `  [${i.toString().padStart(3)}] threadId=${t.threadId.toString().padStart(3)}  flag=0x${t.headerFlag.toString(16).padStart(2, '0')}  body=${t.body.length.toString().padStart(7)}B  strings=${t.strings.length.toString().padStart(3)}  attachments=${t.attachments.length.toString().padStart(2)}  peer=${t.peerPhone ?? '-'}`,
+      `  [${i.toString().padStart(3)}] threadId=${t.threadId.toString().padStart(3)}  flag=0x${t.headerFlag.toString(16).padStart(2, '0')}  body=${t.body.length.toString().padStart(7)}B  strings=${t.strings.length.toString().padStart(3)}  attachments=${t.attachments.length.toString().padStart(2)}  peer=${t.peerId ?? '-'}`,
     );
   }
   console.log('');

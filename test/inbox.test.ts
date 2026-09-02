@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseInbox } from '../src/parser/inbox';
+import { extractPeerNames, findAllPeerIds, parseInbox } from '../src/parser/inbox';
 import type { TlvRecord } from '../src/parser/types';
 
 const encoder = new TextEncoder();
@@ -66,13 +66,19 @@ function buildMessage(params: {
   );
 }
 
-function buildBucket(peerPhone: string, messages: Uint8Array[]): Uint8Array {
+const RS = 0x1e;
+
+/** `RS <id> RS` — how a peer identity closes its contact blob in the real file. */
+function peerMarker(peerId: string): Uint8Array {
+  return concat(new Uint8Array([RS]), encoder.encode(peerId), new Uint8Array([RS]));
+}
+
+function buildBucket(peerId: string, messages: Uint8Array[]): Uint8Array {
   return concat(
     // A small lead-in that isn't the anchor. Our parser looks for the first
-    // length-prefixed '+'-phone; everything before that is effectively
-    // ignored.
+    // peer identity marker; everything before that is effectively ignored.
     new Uint8Array([0x39, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]),
-    lengthPrefixed(peerPhone),
+    peerMarker(peerId),
     ...messages,
   );
 }
@@ -116,7 +122,7 @@ describe('parseInbox', () => {
 
     const buckets = parseInbox(rec);
     expect(buckets).toHaveLength(1);
-    expect(buckets[0]?.peerPhone).toBe('+818012345678');
+    expect(buckets[0]?.peerId).toBe('+818012345678');
     expect(buckets[0]?.messages).toHaveLength(1);
     const m = buckets[0]?.messages[0];
     expect(m?.text).toBe('おはようございます');
@@ -125,7 +131,7 @@ describe('parseInbox', () => {
     expect(m?.timestamp.ms).toBe(Number(ts));
     expect(m?.timestamp.iso).toBe(new Date(Number(ts)).toISOString());
     expect(m?.direction).toBe('incoming');
-    expect(m?.peerPhone).toBe('+818012345678');
+    expect(m?.peerId).toBe('+818012345678');
   });
 
   it('parses multiple messages inside one bucket', () => {
@@ -167,12 +173,39 @@ describe('parseInbox', () => {
     ]);
 
     const buckets = parseInbox(rec);
-    expect(buckets.map((b) => b.peerPhone)).toEqual([
+    expect(buckets.map((b) => b.peerId)).toEqual([
       '+818011111111',
       '+818022222222',
     ]);
     expect(buckets[0]?.messages[0]?.text).toBe('hello');
     expect(buckets[1]?.messages[0]?.text).toBe('world');
+  });
+
+  // Regression: the phone-only marker scan could not see a service address,
+  // so the 12 carrier-notification messages in the real backup were charged
+  // to the phone bucket that happened to precede them.
+  it('splits a service-address bucket from the phone bucket before it', () => {
+    const mkBucket = (peerId: string, text: string, uuid: string) =>
+      buildBucket(peerId, [
+        buildMessage({
+          tsMs: 1754000000000n,
+          text,
+          mime: 'text/plain;charset=utf-8',
+          uuid,
+          sip: '|x|',
+        }),
+      ]);
+    const rec = buildInboxRecord([
+      mkBucket('+819012340002', 'from a person', '11111111-1111-1111-1111-111111111111'),
+      mkBucket('operator@kw.ncs.spmode.ne.jp', 'carrier notice', '22222222-2222-2222-2222-222222222222'),
+    ]);
+
+    const buckets = parseInbox(rec);
+    expect(buckets.map((b) => b.peerId)).toEqual([
+      '+819012340002',
+      'operator@kw.ncs.spmode.ne.jp',
+    ]);
+    expect(buckets.map((b) => b.messages.length)).toEqual([1, 1]);
   });
 
   it('drops non-text MIME bodies from the text field but keeps the record', () => {
@@ -276,5 +309,51 @@ describe('parseInbox', () => {
       raw: new Uint8Array(),
     };
     expect(parseInbox(rec)).toEqual([]);
+  });
+});
+
+describe('findAllPeerIds', () => {
+  it('finds phones and service addresses', () => {
+    const content = encoder.encode(
+      'noise\x1e+818011111111\x1e more \x1eoperator@kw.ncs.spmode.ne.jp\x1e tail',
+    );
+    expect(findAllPeerIds(content).map((m) => m.peerId)).toEqual([
+      '+818011111111',
+      'operator@kw.ncs.spmode.ne.jp',
+    ]);
+  });
+
+  it('ignores RS-wrapped tokens that are neither a phone nor an address', () => {
+    const content = encoder.encode('\x1etel\x1e\x1e0944 72 0123\x1e\x1e+81\x1e');
+    expect(findAllPeerIds(content)).toEqual([]);
+  });
+
+  it('ignores a token carrying non-ASCII bytes', () => {
+    const content = encoder.encode('\x1e花子@example.com\x1e');
+    expect(findAllPeerIds(content)).toEqual([]);
+  });
+});
+
+describe('extractPeerNames', () => {
+  const blob = (name: string, phone: string) =>
+    `\x1d0\x1d\x1d${name}\x1dtel\x1d${phone}\x1d`;
+
+  it('takes the field before the tel tag as the display name', () => {
+    const content = encoder.encode(blob('花子', '+819012340001'));
+    expect(extractPeerNames(content)).toEqual({ '+819012340001': '花子' });
+  });
+
+  it('prefers the most frequent spelling and ignores blank ones', () => {
+    const content = encoder.encode(
+      blob('花子', '+819012340001') +
+        blob('', '+819012340001') +
+        blob('hanako', '+819012340001') +
+        blob('花子', '+819012340001'),
+    );
+    expect(extractPeerNames(content)).toEqual({ '+819012340001': '花子' });
+  });
+
+  it('returns nothing when no blob carries a name', () => {
+    expect(extractPeerNames(encoder.encode(blob('', '+819012340001')))).toEqual({});
   });
 });

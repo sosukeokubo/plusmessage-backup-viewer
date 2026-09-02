@@ -125,10 +125,18 @@ pipe で区切られたフラグも `|1|1|0|` で一定 — **SIP からは方�
   [findings-2026-04-26.md](./findings-2026-04-26.md) Section 6.2
 - ✅ (実施済) アンカー走査の件数確認 — 受信 61 件、送信 5 件で目視
   期待値とほぼ一致 (送信は最古 1 件がスクショ画面外)
-- ✅ (実施済) `findAllPeerPhones` の件数確認 — 18 marker、長さ制約は妥当
+- ✅ (実施済) peer marker の件数確認 — 電話番号 18 件。ただし電話番号だけを
+  探していたため、サービスアドレス 2 件 (`operator@kw.ncs.spmode.ne.jp`,
+  `docomoPlusMessagePoint@maap.plus-msg.com`) を取り逃し、operator 宛の
+  12 通が手前の電話番号バケットに混ざっていた。RS 区切りトークンを見る
+  `findAllPeerIds` に置き換えて解消 (バケット 17 → 18)。
+  詳細: [findings-2026-09-02-peers.md](./findings-2026-09-02-peers.md) Section 4
 
 残課題:
 
+- メディア配信レコードの解読 — SETTINGS には本文 66 件のほかに、画像を
+  配信したレコードが多数ある (RCS の `<file>` XML + `<file-name>`)。
+  これを読めれば画像にもタイムスタンプと送受信方向が付く
 - 0xFFFF 0x1F マーカーの解読 (P2)
 - バケットヘッダの不変量確認 (P2)
 - 1 件の送信アンカーが SETTINGS 範囲の `0x18724` 付近 (バケット 0 の

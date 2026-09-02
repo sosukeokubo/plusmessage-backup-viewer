@@ -11,7 +11,7 @@ import { ParserClient } from './worker/parserClient';
 import { clearBlobCache } from './util/blobCache';
 import {
   buildContactIndex,
-  normalizePhone,
+  normalizePeerId,
   resolveThreadContact,
   type ResolvedContact,
 } from './util/contactResolver';
@@ -127,14 +127,19 @@ export function App() {
 
   const resolveForThread = useCallback(
     (thread: ThreadSummary): ResolvedContact =>
-      resolveThreadContact(thread, contactIndex, threadFileIndex.get(thread.id) ?? 0),
-    [contactIndex, threadFileIndex],
+      resolveThreadContact(
+        thread,
+        contactIndex,
+        threadFileIndex.get(thread.id) ?? 0,
+        summary?.peerNames,
+      ),
+    [contactIndex, threadFileIndex, summary],
   );
 
   const inboxForThread = useCallback(
     (thread: ThreadSummary) => {
-      if (!thread.peerPhone) return undefined;
-      const key = normalizePhone(thread.peerPhone);
+      if (!thread.peerId) return undefined;
+      const key = normalizePeerId(thread.peerId);
       return key ? inboxIndex.get(key) : undefined;
     },
     [inboxIndex],
@@ -145,7 +150,7 @@ export function App() {
     if (!q) return sortedThreads;
     return sortedThreads.filter((t) => {
       const c = resolveForThread(t);
-      const hay = `${c.displayName} ${t.peerPhone ?? ''}`.toLowerCase();
+      const hay = `${c.displayName} ${t.peerId ?? ''}`.toLowerCase();
       return hay.includes(q);
     });
   }, [sortedThreads, searchQuery, resolveForThread]);
@@ -160,8 +165,8 @@ export function App() {
   }, [selectedThread, resolveForThread]);
 
   const selectedInboxMessages = useMemo(() => {
-    if (!selectedThread?.peerPhone) return undefined;
-    const key = normalizePhone(selectedThread.peerPhone);
+    if (!selectedThread?.peerId) return undefined;
+    const key = normalizePeerId(selectedThread.peerId);
     return key ? inboxIndex.get(key) : undefined;
   }, [selectedThread, inboxIndex]);
 

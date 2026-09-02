@@ -19,7 +19,8 @@ import {
 } from './constants';
 import { iterateTlvs, readTlv } from './tlv';
 import { scanAttachments } from './attachments';
-import { parseInbox } from './inbox';
+import { extractPeerNames, findAllPeerIds, parseInbox } from './inbox';
+import { assignThreadPeers, readMediaHeader } from './media';
 import { extractTextRuns } from './textRuns';
 import type {
   Backup,
@@ -208,14 +209,13 @@ function parseContacts(rec: TlvRecord): Contact[] {
  *   +0 (u32 LE): thread ID — sequential 1-based index matching the outer count
  *   +4 (u8):     flag byte — observed 0x00 or 0x01, meaning TBD
  *   +5 (u16 LE): always 0x0000 padding
- *   +7 (u32 LE): size-like field — does not match contentLen exactly,
- *                likely uncompressed payload size; kept as raw for later.
+ *   +7 (u32 LE): decoded payload size — equals the stored byte count for raw
+ *                JPEG, and the inflated size for zlib-wrapped PNG/GIF.
  *
- * Body after the header mixes length-prefixed metadata (UUIDs, URLs, MIME
- * types) with binary payloads (JPEG / zlib-compressed PNG). Full message
- * decoding is deferred to later steps; for now we expose the raw body and a
- * best-effort list of printable ASCII strings so the UI has something useful
- * to show.
+ * The body is a single stored media file: printable metadata (file name,
+ * source locator, MIME) followed by the image bytes. See `readMediaHeader`.
+ * The record carries no peer information; `assignThreadPeers` recovers that
+ * from SETTINGS once every section has been read.
  */
 function parseThread(rec: TlvRecord): Thread {
   if (rec.content.length < THREAD_HEADER_SIZE) {
@@ -231,8 +231,9 @@ function parseThread(rec: TlvRecord): Thread {
   const sizeField = r.readU32LE();
   const body = r.readBytes(r.remaining);
   const bodyAbsoluteOffset = rec.offset + TLV_HEADER_SIZE + THREAD_HEADER_SIZE;
+  const media = readMediaHeader(body);
 
-  return {
+  const thread: Thread = {
     id: `thread-${threadId}`,
     threadId,
     isGroup: false,
@@ -252,6 +253,8 @@ function parseThread(rec: TlvRecord): Thread {
     headerFlag: flag,
     headerSizeField: sizeField,
   };
+  if (media) thread.media = media;
+  return thread;
 }
 
 function parseMessages(
@@ -340,10 +343,21 @@ export function parseBackup(
     }
   }
 
+  // Media records and peer identities live in different sections, so the join
+  // runs once every section has been read rather than inside the loop — the
+  // ordering of SETTINGS vs MESSAGES is not something we want to depend on.
+  let peerNames: Record<string, string> = {};
+  if (settings) {
+    const settingsContent = settings.bytes.subarray(TLV_HEADER_SIZE);
+    assignThreadPeers(threads, settingsContent, findAllPeerIds(settingsContent));
+    peerNames = extractPeerNames(settingsContent);
+  }
+
   const bytesConsumed = reader.offset + (hasTrailingMagic ? MAGIC_BYTES.length : 0);
 
   const backup: Backup = {
     contacts,
+    peerNames,
     threads,
     sections,
     unknownSections,
@@ -412,12 +426,14 @@ export function summarizeBackup(backup: Backup): BackupSummary {
       headerFlag: t.headerFlag,
       headerSizeField: t.headerSizeField,
     };
-    if (t.peerPhone !== undefined) out.peerPhone = t.peerPhone;
+    if (t.peerId !== undefined) out.peerId = t.peerId;
+    if (t.media !== undefined) out.media = t.media;
     return out;
   };
 
   const summary: BackupSummary = {
     contacts: backup.contacts.map(summarizeContact),
+    peerNames: backup.peerNames,
     threads: backup.threads.map(summarizeThread),
     sections: backup.sections.map(summarizeChunk),
     unknownSections: backup.unknownSections.map(summarizeChunk),
