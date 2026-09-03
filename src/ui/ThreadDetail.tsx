@@ -161,7 +161,7 @@ export function ThreadDetail({
                 textOverflow: 'ellipsis',
                 whiteSpace: 'nowrap',
               }}
-              title={contact.displayName}
+              title={contact.sourceId ?? contact.displayName}
             >
               {contact.displayName}
             </div>

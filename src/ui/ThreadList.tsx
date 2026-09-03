@@ -230,7 +230,7 @@ function ThreadRow({
             flex: 1,
             minWidth: 0,
           }}
-          title={contact.displayName}
+          title={contact.sourceId ?? contact.displayName}
         >
           {contact.displayName}
         </span>

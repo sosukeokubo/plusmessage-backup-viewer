@@ -4,6 +4,8 @@ export interface ResolvedContact {
   displayName: string;
   kind: 'named' | 'phone' | 'service' | 'group' | 'unknown';
   avatarInitial: string;
+  /** ファイル上の値。`displayName` がその整形結果であるときだけ入る。 */
+  sourceId?: string;
 }
 
 const PHONE_LIKE = /^\+?[\d\-()\s]{8,}$/;
@@ -17,10 +19,13 @@ export function normalizePhone(raw: string): string {
 }
 
 /**
- * Key for joining a peer across sections. Phones normalise to bare digits so
- * `090-1111-2222` and `+819011112222` land on different keys only when they
- * really are different numbers; service addresses (`operator@kw.…`) have no
- * digits to strip, so they keep their own text lowercased.
+ * Key for joining a peer across sections. Phones normalise to bare digits and
+ * service addresses (`operator@kw.…`) have no digits to strip, so they keep
+ * their own text lowercased.
+ *
+ * The country code is *not* normalised: `+819011112222` and `09011112222` are
+ * the same number but land on different keys. Every phone in the real backup
+ * is stored in `+81` form, so the split has never been observed — Q14.
  */
 export function normalizePeerId(raw: string): string {
   const trimmed = raw.trim();
@@ -28,8 +33,26 @@ export function normalizePeerId(raw: string): string {
   return isPhoneLike(trimmed) ? normalizePhone(trimmed) : trimmed.toLowerCase();
 }
 
+const JP_COUNTRY_CODE = '81';
+
+/**
+ * Format a number for display, in the domestic notation a Japanese phonebook
+ * shows. `+81` numbers get their country code swapped back for the leading
+ * `0` it replaced, which puts both mobiles (`+81` + 10 digits) and landlines
+ * (`+81` + 9) on the length rules below.
+ *
+ * Other country codes are returned untouched: none appear in the real backup,
+ * so how to group their digits would be a guess — and applying the Japanese
+ * rules to them silently produces a wrong-looking number.
+ */
 export function formatPhone(raw: string): string {
-  const d = normalizePhone(raw);
+  const trimmed = raw.trim();
+  const digits = normalizePhone(trimmed);
+  let d = digits;
+  if (trimmed.startsWith('+')) {
+    if (!digits.startsWith(JP_COUNTRY_CODE)) return raw;
+    d = `0${digits.slice(JP_COUNTRY_CODE.length)}`;
+  }
   if (d.length === 11) return `${d.slice(0, 3)}-${d.slice(3, 7)}-${d.slice(7)}`;
   if (d.length === 10) return `${d.slice(0, 2)}-${d.slice(2, 6)}-${d.slice(6)}`;
   return raw;
@@ -98,6 +121,9 @@ export function resolveThreadContact(
       displayName: pretty,
       kind: 'phone',
       avatarInitial: key.slice(-1) || '?',
+      // Only when the digits themselves were rewritten — a domestic number
+      // that merely gained hyphens has nothing worth showing on hover.
+      ...(normalizePhone(pretty) === key ? {} : { sourceId: thread.peerId }),
     };
   }
   return {

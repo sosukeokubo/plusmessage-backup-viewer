@@ -65,6 +65,18 @@ describe('formatPhone', () => {
   it('returns original when length does not match', () => {
     expect(formatPhone('12345')).toBe('12345');
   });
+  it('shows +81 mobiles in domestic notation', () => {
+    expect(formatPhone('+819012340001')).toBe('090-1234-0001');
+  });
+  it('shows +81 landlines in domestic notation', () => {
+    expect(formatPhone('+81312340001')).toBe('03-1234-0001');
+  });
+  it('leaves other country codes alone rather than guessing their grouping', () => {
+    expect(formatPhone('+12025550123')).toBe('+12025550123');
+  });
+  it('treats a leading 81 as a country code only when the + is there', () => {
+    expect(formatPhone('08112345678')).toBe('081-1234-5678');
+  });
 });
 
 describe('buildContactIndex', () => {
@@ -113,6 +125,18 @@ describe('resolveThreadContact', () => {
     expect(r.kind).toBe('phone');
     expect(r.displayName).toBe('080-9999-8888');
     expect(r.avatarInitial).toBe('8');
+    expect(r.sourceId).toBeUndefined();
+  });
+
+  it('keeps the stored +81 form alongside the domestic display', () => {
+    const r = resolveThreadContact(
+      makeThread({ peerId: '+819012340004' }),
+      idx,
+      0,
+    );
+    expect(r.kind).toBe('phone');
+    expect(r.displayName).toBe('090-1234-0004');
+    expect(r.sourceId).toBe('+819012340004');
   });
 
   it('falls back to sequential label when no phone', () => {
