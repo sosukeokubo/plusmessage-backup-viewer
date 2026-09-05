@@ -4,6 +4,10 @@
 
 **ファイルはサーバーに送信されません。** すべての処理はブラウザ内で完結します。
 
+**公開版: https://plusmessage-backup-viewer.sosukeokubo.workers.dev**
+
+インストール不要で、そのままブラウザで使えます。
+
 > ドキュメントとテストに出てくる電話番号・氏名・メッセージ本文・UUID は
 > **すべて架空の値**です。解析対象は実在する個人のバックアップのため、
 > 実データは一切コミットしていません。詳細は [CLAUDE.md](./CLAUDE.md)。
@@ -53,6 +57,8 @@ pnpm preview
 npx wrangler deploy
 ```
 
+デプロイ先は https://plusmessage-backup-viewer.sosukeokubo.workers.dev。
+
 Worker スクリプトは書いていないので、`wrangler.jsonc` に `main` は無い。
 `dist/_headers` が欠けるとヘッダは**エラーを出さずに消える**ため、
 デプロイ後は下の `curl -I` で必ず確認する。
@@ -64,7 +70,8 @@ Workers を既定にしている。
 ### プライバシー検証
 
 - DevTools → Network タブで、静的アセット以外の通信が発生しないことを確認
-- `curl -I <公開URL>` で `Content-Security-Policy` / `Cross-Origin-Opener-Policy` が配信されていることを確認
+- `curl -I https://plusmessage-backup-viewer.sosukeokubo.workers.dev` で `Content-Security-Policy` /
+  `Cross-Origin-Opener-Policy` が配信されていることを確認
 
 ## 解析ドキュメント
 
