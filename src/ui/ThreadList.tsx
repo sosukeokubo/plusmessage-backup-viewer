@@ -2,7 +2,6 @@ import { useRef } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import type { InboxMessage, ThreadSummary } from '../parser/types';
 import type { ResolvedContact } from '../util/contactResolver';
-import { filterMessageStrings } from '../util/stringFilter';
 import { Avatar } from './Avatar';
 import type { ThreadSort } from './SortControls';
 
@@ -165,27 +164,15 @@ function ThreadRow({
   selected: boolean;
   onClick: () => void;
 }) {
-  const messageTexts = filterMessageStrings(thread.strings);
   const inboxCount = inbox?.length ?? 0;
   const latestInboxText = inbox && inbox.length > 0
     ? inbox.reduce((latest, m) =>
         m.timestamp.ms > latest.timestamp.ms ? m : latest,
       ).text
     : '';
-  const preview = latestInboxText.trim() || messageTexts.at(-1)?.text || '';
+  const preview = latestInboxText.trim();
   const photoCount = thread.attachments.length;
-  const textCount = messageTexts.length;
-  const rawStringCount = thread.strings.length;
-  // Fallback hierarchy when preview is empty:
-  //   - 写真はあるがテキストは無し     → 「写真のみ」
-  //   - パーサが何らかの ASCII は見た   → 「表示できるテキストなし」
-  //   - まったくデータが無い            → 空文字で静かに
-  const fallback =
-    photoCount > 0
-      ? '写真のみ'
-      : rawStringCount > 0
-        ? '表示できるテキストはありません'
-        : '';
+  const fallback = photoCount > 0 ? '写真のみ' : '表示できるテキストはありません';
 
   return (
     <button
@@ -238,7 +225,6 @@ function ThreadRow({
           {[
             inboxCount > 0 ? `メッセージ${inboxCount}` : '',
             photoCount > 0 ? `写真${photoCount}` : '',
-            textCount > 0 ? `断片${textCount}` : '',
           ]
             .filter(Boolean)
             .join(' · ')}

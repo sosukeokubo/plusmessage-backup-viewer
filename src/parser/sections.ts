@@ -245,12 +245,10 @@ function parseThread(rec: TlvRecord): Thread {
     unknownFields: [],
     raw: toRawChunk(rec),
     body,
-    // Min 6 codepoints mirrors the previous ASCII-only guard; 500 is plenty
-    // for a single thread while keeping the summary payload bounded.
-    // Raised above the plain-UTF-8 validation minimum so short runs of random
-    // binary that happen to decode (e.g. one stray kanji plus ASCII symbols)
-    // don't flood the "取り出せたテキスト断片" list. The real message bodies
-    // come from the structured inbox parser.
+    // A THREAD body is one attachment's bytes, so these runs are the file's
+    // own internals rather than message text — measured on the real backup,
+    // all 8,199 of them are unreadable. Kept only as a debugging aid; the UI
+    // shows them behind the debug flag. Real bodies come from SETTINGS.
     strings: extractTextRuns(body, bodyAbsoluteOffset, { minCodepoints: 8, maxRuns: 500 }),
     attachments: scanAttachments(body, bodyAbsoluteOffset),
     headerFlag: flag,

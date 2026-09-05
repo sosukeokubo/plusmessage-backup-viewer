@@ -3,7 +3,6 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import type { AttachmentRef, InboxMessage, ThreadSummary } from '../parser/types';
 import type { ParserClient } from '../worker/parserClient';
 import type { ResolvedContact } from '../util/contactResolver';
-import { filterMessageStrings } from '../util/stringFilter';
 import { AttachmentImage } from './AttachmentImage';
 import { Avatar } from './Avatar';
 import { Lightbox } from './Lightbox';
@@ -52,10 +51,10 @@ export function ThreadDetail({
 }: Props) {
   const [lightbox, setLightbox] = useState<string | null>(null);
 
-  const visibleStrings = useMemo(() => {
-    if (!thread) return [];
-    return debug ? thread.strings : filterMessageStrings(thread.strings);
-  }, [thread, debug]);
+  // The runs scanned out of a THREAD body are bytes of the attachment itself,
+  // not undecoded message text — 8,199 of them across the real backup, none
+  // readable. They stay available as a debugging aid and nothing more.
+  const visibleStrings = useMemo(() => (debug && thread ? thread.strings : []), [thread, debug]);
 
   // Text bodies and media arrive from different sections but describe one
   // conversation, so they are merged into a single ordered list rather than
@@ -118,13 +117,11 @@ export function ThreadDetail({
   }
 
   const photoCount = thread.attachments.length;
-  const totalStrings = thread.strings.length;
   const shownStrings = visibleStrings.length;
   const messageCount = timeline.filter((e) => e.kind === 'text').length;
   const headerSummary = [
     messageCount > 0 ? `メッセージ ${messageCount} 件` : null,
     photoCount > 0 ? `写真 ${photoCount} 枚` : null,
-    shownStrings > 0 ? `テキスト断片 ${shownStrings} 件` : null,
   ]
     .filter(Boolean)
     .join(' · ');
@@ -203,8 +200,7 @@ export function ThreadDetail({
             lineHeight: 1.5,
           }}
         >
-          💡 バックアップから復元できたメッセージを表示しています。一部のテキストは断片として
-          表示される場合があります。
+          💡 バックアップから復元できたメッセージと画像を、送受信の日時順に表示しています。
         </div>
 
         {timeline.length > 0 && (
@@ -257,7 +253,7 @@ export function ThreadDetail({
           </section>
         )}
 
-        {(debug || shownStrings > 0) && (
+        {debug && (
           <div
             style={{
               padding: '10px 16px 6px',
@@ -267,14 +263,10 @@ export function ThreadDetail({
             }}
           >
             <h3 style={{ fontSize: 13, margin: 0, color: 'var(--text-muted)' }}>
-              取り出せたテキスト断片
+              body から拾ったバイト列
             </h3>
             <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-              {debug
-                ? `${totalStrings} 件（フィルタ解除）`
-                : shownStrings === totalStrings
-                  ? `${shownStrings} 件`
-                  : `${shownStrings} 件（元 ${totalStrings} 件中）`}
+              {shownStrings} 件 · 添付の中身であって本文ではない
             </span>
           </div>
         )}
@@ -290,7 +282,7 @@ export function ThreadDetail({
                   color: 'var(--text-muted)',
                 }}
               >
-                取り出せるテキストがありませんでした。
+                取り出せるバイト列がありませんでした。
               </div>
             ) : null
           ) : (
