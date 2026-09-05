@@ -3,7 +3,7 @@ import { WelcomeScreen } from './ui/WelcomeScreen';
 import { ThreadList } from './ui/ThreadList';
 import { ThreadDetail } from './ui/ThreadDetail';
 import { DarkModeToggle } from './ui/DarkModeToggle';
-import { SortControls, type ThreadSort } from './ui/SortControls';
+import { SortControls } from './ui/SortControls';
 import { HexDump } from './debug/HexDump';
 import { TlvTree } from './debug/TlvTree';
 import type { BackupSummary, ParseProgress, ThreadSummary } from './parser/types';
@@ -16,6 +16,7 @@ import {
   type ResolvedContact,
 } from './util/contactResolver';
 import { buildInboxIndex, composeThreadList } from './util/inboxIndex';
+import { buildLatestActivity, sortThreads, type ThreadSort } from './util/threadSort';
 
 const STAGE_LABEL: Record<ParseProgress['stage'], string> = {
   scan: 'バックアップを確認中…',
@@ -44,7 +45,7 @@ export function App() {
   const [jumpOffset, setJumpOffset] = useState<number | undefined>(undefined);
   const [showDebug, setShowDebug] = useState(false);
   const [selectedThreadId, setSelectedThreadId] = useState<string | undefined>(undefined);
-  const [threadSort, setThreadSort] = useState<ThreadSort>('file-order');
+  const [threadSort, setThreadSort] = useState<ThreadSort>('recent');
   const [searchQuery, setSearchQuery] = useState('');
   const [client, setClient] = useState<ParserClient | null>(null);
   const clientRef = useRef<ParserClient | null>(null);
@@ -121,9 +122,15 @@ export function App() {
     return map;
   }, [composedThreads]);
 
-  const sortedThreads = useMemo(() => {
-    return sortThreads(composedThreads, threadSort);
-  }, [composedThreads, threadSort]);
+  const latestActivity = useMemo(
+    () => buildLatestActivity(composedThreads, inboxIndex),
+    [composedThreads, inboxIndex],
+  );
+
+  const sortedThreads = useMemo(
+    () => sortThreads(composedThreads, threadSort, latestActivity),
+    [composedThreads, threadSort, latestActivity],
+  );
 
   const resolveForThread = useCallback(
     (thread: ThreadSummary): ResolvedContact =>
@@ -363,17 +370,6 @@ function ProgressIndicator({
       </span>
     </span>
   );
-}
-
-function sortThreads(threads: ThreadSummary[], sort: ThreadSort): ThreadSummary[] {
-  if (sort === 'file-order') return threads;
-  const copy = [...threads];
-  if (sort === 'message-volume') {
-    copy.sort((a, b) => b.bodyLength - a.bodyLength);
-  } else if (sort === 'attachment-count') {
-    copy.sort((a, b) => b.attachments.length - a.attachments.length);
-  }
-  return copy;
 }
 
 function PlaceholderBox({ message }: { message: string }) {

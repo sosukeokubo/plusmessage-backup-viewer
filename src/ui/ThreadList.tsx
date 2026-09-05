@@ -3,13 +3,7 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import type { InboxMessage, ThreadSummary } from '../parser/types';
 import type { ResolvedContact } from '../util/contactResolver';
 import { Avatar } from './Avatar';
-import type { ThreadSort } from './SortControls';
-
-const SORT_LABEL: Record<ThreadSort, string> = {
-  'file-order': '元の順序',
-  'message-volume': 'やり取りが多い順',
-  'attachment-count': '写真が多い順',
-};
+import { SORT_LABELS, type ThreadSort } from '../util/threadSort';
 
 interface Props {
   totalCount: number;
@@ -88,7 +82,7 @@ export function ThreadList({
           {showingAll ? (
             <>
               会話 <strong style={{ color: 'var(--text)' }}>{totalCount}</strong> 件 ·{' '}
-              {SORT_LABEL[sort]}
+              {SORT_LABELS[sort]}
             </>
           ) : (
             <>

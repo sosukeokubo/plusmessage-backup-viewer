@@ -1,10 +1,4 @@
-export type ThreadSort = 'file-order' | 'message-volume' | 'attachment-count';
-
-const OPTIONS: { value: ThreadSort; label: string }[] = [
-  { value: 'file-order', label: '元の順序' },
-  { value: 'message-volume', label: 'やり取りが多い順' },
-  { value: 'attachment-count', label: '写真が多い順' },
-];
+import { SORT_LABELS, SORT_OPTIONS, type ThreadSort } from '../util/threadSort';
 
 interface Props {
   value: ThreadSort;
@@ -36,9 +30,9 @@ export function SortControls({ value, onChange }: Props) {
           fontFamily: 'inherit',
         }}
       >
-        {OPTIONS.map((opt) => (
-          <option key={opt.value} value={opt.value}>
-            {opt.label}
+        {SORT_OPTIONS.map((opt) => (
+          <option key={opt} value={opt}>
+            {SORT_LABELS[opt]}
           </option>
         ))}
       </select>
