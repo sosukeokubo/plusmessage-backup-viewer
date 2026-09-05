@@ -39,4 +39,3 @@ export function SortControls({ value, onChange }: Props) {
     </label>
   );
 }
-

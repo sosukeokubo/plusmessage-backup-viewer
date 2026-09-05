@@ -1,11 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildInboxIndex, composeThreadList } from '../src/util/inboxIndex';
-import type {
-  AttachmentRef,
-  InboxBucket,
-  InboxMessage,
-  ThreadSummary,
-} from '../src/parser/types';
+import type { AttachmentRef, InboxBucket, InboxMessage, ThreadSummary } from '../src/parser/types';
 
 function makeThread(partial: Partial<ThreadSummary>): ThreadSummary {
   return {
@@ -73,9 +68,26 @@ describe('composeThreadList', () => {
   it('folds media records sharing a peer into one row', () => {
     const rows = composeThreadList(
       [
-        makeThread({ id: 'thread-1', threadId: 1, peerId: '+818011111111', bodyLength: 10, attachments: [attachment(1)] }),
-        makeThread({ id: 'thread-2', threadId: 2, peerId: '+818011111111', bodyLength: 20, attachments: [attachment(2)] }),
-        makeThread({ id: 'thread-3', threadId: 3, peerId: '+818022222222', attachments: [attachment(3)] }),
+        makeThread({
+          id: 'thread-1',
+          threadId: 1,
+          peerId: '+818011111111',
+          bodyLength: 10,
+          attachments: [attachment(1)],
+        }),
+        makeThread({
+          id: 'thread-2',
+          threadId: 2,
+          peerId: '+818011111111',
+          bodyLength: 20,
+          attachments: [attachment(2)],
+        }),
+        makeThread({
+          id: 'thread-3',
+          threadId: 3,
+          peerId: '+818022222222',
+          attachments: [attachment(3)],
+        }),
       ],
       undefined,
     );

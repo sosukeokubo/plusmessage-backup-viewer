@@ -62,10 +62,7 @@ const utf8 = new TextDecoder('utf-8', { fatal: false });
  * (inner type=0x000c) and CONTACTS (inner type=0x000e). Verified against
  * the real 65MB backup: every top-level META/CONTACTS container obeys this.
  */
-function readCountedContainer(
-  content: Uint8Array,
-  expectedInnerType: number,
-): TlvRecord[] {
+function readCountedContainer(content: Uint8Array, expectedInnerType: number): TlvRecord[] {
   if (content.length < 4) {
     throw new Error(`counted container too short: ${content.length}B`);
   }
@@ -258,10 +255,7 @@ function parseThread(rec: TlvRecord): Thread {
   return thread;
 }
 
-function parseMessages(
-  rec: TlvRecord,
-  onProgress?: (p: ParseProgress) => void,
-): Thread[] {
+function parseMessages(rec: TlvRecord, onProgress?: (p: ParseProgress) => void): Thread[] {
   // readCountedContainer yields records whose offsets are relative to the
   // container content. Rebase them to absolute file offsets so downstream
   // consumers (strings, summaries, hex jumps) see real positions.
@@ -285,10 +279,7 @@ function parseMessages(
   return out;
 }
 
-export function parseBackup(
-  buffer: Uint8Array,
-  onProgress?: (p: ParseProgress) => void,
-): Backup {
+export function parseBackup(buffer: Uint8Array, onProgress?: (p: ParseProgress) => void): Backup {
   const fileSize = buffer.byteLength;
 
   if (!isMagicAt(buffer, 0)) {

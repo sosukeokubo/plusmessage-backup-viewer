@@ -52,10 +52,7 @@ function SectionRow({
         offset {formatHex(chunk.offset, 8)} · {chunk.length.toLocaleString()} B
       </span>
       {onJumpTo && (
-        <button
-          onClick={() => onJumpTo(chunk.offset)}
-          style={{ fontSize: 11, padding: '2px 6px' }}
-        >
+        <button onClick={() => onJumpTo(chunk.offset)} style={{ fontSize: 11, padding: '2px 6px' }}>
           hex へ
         </button>
       )}

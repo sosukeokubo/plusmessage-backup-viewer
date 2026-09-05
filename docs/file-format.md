@@ -33,21 +33,21 @@ offset  size  内容
 
 ### 既知のセクションタイプ
 
-| type   | 名前       | 用途                    | パース状況 |
-|--------|------------|-------------------------|------------|
-| 0x0001 | SETTINGS   | **実体はメッセージストア本体** | ✅ |
-| 0x0005 | MESSAGES   | スレッドコンテナ         | ✅ |
-| 0x0006 | THREAD     | メディア 1 件（会話ではない） | ✅ |
-| 0x0008 | END        | セクション終端センチネル | ✅ |
-| 0x000b | META       | KV ペアのバックアップ設定 | ✅ |
-| 0x000d | CONTACTS   | 連絡先帳                | ✅ |
+| type   | 名前     | 用途                           | パース状況 |
+| ------ | -------- | ------------------------------ | ---------- |
+| 0x0001 | SETTINGS | **実体はメッセージストア本体** | ✅         |
+| 0x0005 | MESSAGES | スレッドコンテナ               | ✅         |
+| 0x0006 | THREAD   | メディア 1 件（会話ではない）  | ✅         |
+| 0x0008 | END      | セクション終端センチネル       | ✅         |
+| 0x000b | META     | KV ペアのバックアップ設定      | ✅         |
+| 0x000d | CONTACTS | 連絡先帳                       | ✅         |
 
 ### 既知の内部アイテムタイプ
 
-| type   | 名前       | 親セクション | パース状況 |
-|--------|------------|--------------|------------|
-| 0x000c | KEY_VALUE  | META         | ✅ |
-| 0x000e | CONTACT    | CONTACTS     | ✅ |
+| type   | 名前      | 親セクション | パース状況 |
+| ------ | --------- | ------------ | ---------- |
+| 0x000c | KEY_VALUE | META         | ✅         |
+| 0x000e | CONTACT   | CONTACTS     | ✅         |
 
 ## 3. 末尾マジック（EOF-9 ～ EOF）
 
@@ -127,11 +127,11 @@ THREAD.body:
 
 観測された `path` の 3 系統:
 
-| 系統 | 例 | flag |
-|---|---|---|
-| キャリアの資材サーバ | `0,https://a-wss.kw.ncs.spmode.ne.jp/wss-core//rest/resource/…` | 1 |
-| iOS フォトライブラリ | `0,app://photos-kit/<uuid>/L0/001/RESIZE` | 0 |
-| アプリのサンドボックス | `0,/var/mobile/Containers/Data/Application/…/tmp/IMG_….jpg` | 0 |
+| 系統                   | 例                                                              | flag |
+| ---------------------- | --------------------------------------------------------------- | ---- |
+| キャリアの資材サーバ   | `0,https://a-wss.kw.ncs.spmode.ne.jp/wss-core//rest/resource/…` | 1    |
+| iOS フォトライブラリ   | `0,app://photos-kit/<uuid>/L0/001/RESIZE`                       | 0    |
+| アプリのサンドボックス | `0,/var/mobile/Containers/Data/Application/…/tmp/IMG_….jpg`     | 0    |
 
 コード: [src/parser/sections.ts](../src/parser/sections.ts:220) の `parseThread`
 

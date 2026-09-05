@@ -86,8 +86,8 @@ export function ThreadList({
             </>
           ) : (
             <>
-              <strong style={{ color: 'var(--text)' }}>{threads.length}</strong> 件 /{' '}
-              {totalCount} 件中
+              <strong style={{ color: 'var(--text)' }}>{threads.length}</strong> 件 / {totalCount}{' '}
+              件中
             </>
           )}
         </div>
@@ -159,11 +159,10 @@ function ThreadRow({
   onClick: () => void;
 }) {
   const inboxCount = inbox?.length ?? 0;
-  const latestInboxText = inbox && inbox.length > 0
-    ? inbox.reduce((latest, m) =>
-        m.timestamp.ms > latest.timestamp.ms ? m : latest,
-      ).text
-    : '';
+  const latestInboxText =
+    inbox && inbox.length > 0
+      ? inbox.reduce((latest, m) => (m.timestamp.ms > latest.timestamp.ms ? m : latest)).text
+      : '';
   const preview = latestInboxText.trim();
   const photoCount = thread.attachments.length;
   const fallback = photoCount > 0 ? '写真のみ' : '表示できるテキストはありません';

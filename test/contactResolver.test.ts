@@ -106,22 +106,14 @@ describe('resolveThreadContact', () => {
   });
 
   it('resolves known contacts by name', () => {
-    const r = resolveThreadContact(
-      makeThread({ peerId: '090-1111-2222' }),
-      idx,
-      0,
-    );
+    const r = resolveThreadContact(makeThread({ peerId: '090-1111-2222' }), idx, 0);
     expect(r.kind).toBe('named');
     expect(r.displayName).toBe('山田太郎');
     expect(r.avatarInitial).toBe('山');
   });
 
   it('formats unknown phone numbers', () => {
-    const r = resolveThreadContact(
-      makeThread({ peerId: '08099998888' }),
-      idx,
-      0,
-    );
+    const r = resolveThreadContact(makeThread({ peerId: '08099998888' }), idx, 0);
     expect(r.kind).toBe('phone');
     expect(r.displayName).toBe('080-9999-8888');
     expect(r.avatarInitial).toBe('8');
@@ -129,11 +121,7 @@ describe('resolveThreadContact', () => {
   });
 
   it('keeps the stored +81 form alongside the domestic display', () => {
-    const r = resolveThreadContact(
-      makeThread({ peerId: '+819012340004' }),
-      idx,
-      0,
-    );
+    const r = resolveThreadContact(makeThread({ peerId: '+819012340004' }), idx, 0);
     expect(r.kind).toBe('phone');
     expect(r.displayName).toBe('090-1234-0004');
     expect(r.sourceId).toBe('+819012340004');
@@ -151,23 +139,16 @@ describe('resolveThreadContact with SETTINGS names', () => {
   const idx = buildContactIndex([]);
 
   it('uses a name recovered from SETTINGS when CONTACTS has none', () => {
-    const r = resolveThreadContact(
-      makeThread({ peerId: '+819012340001' }),
-      idx,
-      0,
-      { '+819012340001': '花子' },
-    );
+    const r = resolveThreadContact(makeThread({ peerId: '+819012340001' }), idx, 0, {
+      '+819012340001': '花子',
+    });
     expect(r.kind).toBe('named');
     expect(r.displayName).toBe('花子');
     expect(r.avatarInitial).toBe('花');
   });
 
   it('shows a service address verbatim rather than guessing a label', () => {
-    const r = resolveThreadContact(
-      makeThread({ peerId: 'operator@kw.ncs.spmode.ne.jp' }),
-      idx,
-      0,
-    );
+    const r = resolveThreadContact(makeThread({ peerId: 'operator@kw.ncs.spmode.ne.jp' }), idx, 0);
     expect(r.kind).toBe('service');
     expect(r.displayName).toBe('operator@kw.ncs.spmode.ne.jp');
     expect(r.avatarInitial).toBe('o');

@@ -249,13 +249,9 @@ export function App() {
               {!showDebug && summary && (
                 <SortControls value={threadSort} onChange={setThreadSort} />
               )}
-              {parseInFlight && (
-                <ProgressIndicator progress={progress} debug={debugEnabled} />
-              )}
+              {parseInFlight && <ProgressIndicator progress={progress} debug={debugEnabled} />}
               {parseError && (
-                <span style={{ color: 'var(--danger)', fontSize: 12 }}>
-                  読込失敗: {parseError}
-                </span>
+                <span style={{ color: 'var(--danger)', fontSize: 12 }}>読込失敗: {parseError}</span>
               )}
             </div>
             <div
@@ -314,9 +310,7 @@ export function App() {
               ) : (
                 <PlaceholderBox
                   message={
-                    parseError
-                      ? '読込に失敗しました。別のファイルをお試しください。'
-                      : '読込中…'
+                    parseError ? '読込に失敗しました。別のファイルをお試しください。' : '読込中…'
                   }
                 />
               )}

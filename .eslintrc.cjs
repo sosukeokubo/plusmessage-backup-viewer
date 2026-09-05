@@ -10,10 +10,7 @@ module.exports = {
   parser: '@typescript-eslint/parser',
   plugins: ['react-refresh'],
   rules: {
-    'react-refresh/only-export-components': [
-      'warn',
-      { allowConstantExport: true },
-    ],
+    'react-refresh/only-export-components': ['warn', { allowConstantExport: true }],
     '@typescript-eslint/no-unused-vars': [
       'error',
       { argsIgnorePattern: '^_', varsIgnorePattern: '^_' },
@@ -24,8 +21,7 @@ module.exports = {
         patterns: [
           {
             group: ['react', 'react-dom', '*/ui/*', '*/debug/*'],
-            message:
-              'parser/ は React や DOM に依存してはいけません — 純粋関数として保つこと',
+            message: 'parser/ は React や DOM に依存してはいけません — 純粋関数として保つこと',
           },
         ],
       },

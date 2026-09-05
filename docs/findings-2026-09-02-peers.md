@@ -18,12 +18,12 @@ undefined」を解いた記録。あわせて Q2 / Q4-bis / Q9 も決着した�
 当初の計画は「各 thread body から `findAllPeerPhones` で `+`電話番号を探す」
 だった。44 スレッド全部に対して実行した結果：
 
-| 探索対象 | ヒット |
-|---|---|
-| 長さ接頭辞つき `+`電話番号 | 0 |
-| 生の `+81…` 文字列 | 0 |
-| 国内表記 `090…` | 0 |
-| `sip:` / `tel:` URI | 0 |
+| 探索対象                   | ヒット |
+| -------------------------- | ------ |
+| 長さ接頭辞つき `+`電話番号 | 0      |
+| 生の `+81…` 文字列         | 0      |
+| 国内表記 `090…`            | 0      |
+| `sip:` / `tel:` URI        | 0      |
 
 **thread body には相手を示すバイトが 1 つも無い。** CONTACTS (85 件) と
 THREAD (44 件) の index 対応も存在しない。
@@ -36,12 +36,12 @@ body 先頭をデコードすると構造が割れる：
 [u32 nameLen][name][u32 pathLen][path][u32 mimeLen][mime][0x0007][sizes…][画像バイト列]
 ```
 
-| tid | name | mime | path |
-|---|---|---|---|
-| 1 | `3f2a91c7-0b4d-4e18-9a52-6c7d8e0f1a2b` | image/png | `0,https://a-wss.kw.ncs.spmode.ne.jp/…` |
-| 8 | `7c8d9e0f-1a2b-4c3d-8e5f-6a7b8c9d0e1f` | image/gif | `0,https://sticker-a.w01.rcs.kddi.ne.jp/…` |
-| 9 | `IMG_2895.jpg` | image/jpeg | `0,app://photos-kit/F0E1D2C3-…/L0/001/RESIZE` |
-| 17 | `IMG_20230330_174646_1681607355610.jpg` | image/jpeg | `0,/var/mobile/Containers/Data/Application/…` |
+| tid | name                                    | mime       | path                                          |
+| --- | --------------------------------------- | ---------- | --------------------------------------------- |
+| 1   | `3f2a91c7-0b4d-4e18-9a52-6c7d8e0f1a2b`  | image/png  | `0,https://a-wss.kw.ncs.spmode.ne.jp/…`       |
+| 8   | `7c8d9e0f-1a2b-4c3d-8e5f-6a7b8c9d0e1f`  | image/gif  | `0,https://sticker-a.w01.rcs.kddi.ne.jp/…`    |
+| 9   | `IMG_2895.jpg`                          | image/jpeg | `0,app://photos-kit/F0E1D2C3-…/L0/001/RESIZE` |
+| 17  | `IMG_20230330_174646_1681607355610.jpg` | image/jpeg | `0,/var/mobile/Containers/Data/Application/…` |
 
 **1 レコード = 1 ファイル**。会話ではないので相手情報を持たないのは当然で、
 Q2「会話 1〜61 とは何か」の答えでもある。61 = メディア 44 + SMS バケット 17
@@ -68,10 +68,10 @@ Q2「会話 1〜61 とは何か」の答えでもある。61 = メディア 44 +
 その出現位置に対して「直前の peer 識別子」を取ると **44/44 が一意に解決**する
 （複数の peer に割れたものはゼロ）。
 
-| peer | メディア数 |
-|---|---|
-| `+819012340001` | 43 |
-| `docomoPlusMessagePoint@maap.plus-msg.com` | 1 |
+| peer                                       | メディア数 |
+| ------------------------------------------ | ---------- |
+| `+819012340001`                            | 43         |
+| `docomoPlusMessagePoint@maap.plus-msg.com` | 1          |
 
 ## 4. peer 識別子は電話番号だけではない
 
@@ -112,13 +112,13 @@ GS 0 GS "" GS <表示名> GS tel GS <電話番号> GS
 
 ## 6. 実装
 
-| ファイル | 内容 |
-|---|---|
-| [src/parser/inbox.ts](../src/parser/inbox.ts) | `findAllPeerIds` / `extractPeerNames` を追加。`parseInbox` を marker ベースに |
-| [src/parser/media.ts](../src/parser/media.ts) | `readMediaHeader` / `assignThreadPeers`（新規） |
-| [src/parser/sections.ts](../src/parser/sections.ts) | `parseThread` でメディアヘッダを保持。全セクション読了後に post-pass で結合 |
-| [src/util/contactResolver.ts](../src/util/contactResolver.ts) | `normalizePeerId` を追加。表示名は CONTACTS → SETTINGS → 電話番号の順 |
-| [src/util/inboxIndex.ts](../src/util/inboxIndex.ts) | `composeThreadList` を peer 単位マージに |
+| ファイル                                                      | 内容                                                                          |
+| ------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| [src/parser/inbox.ts](../src/parser/inbox.ts)                 | `findAllPeerIds` / `extractPeerNames` を追加。`parseInbox` を marker ベースに |
+| [src/parser/media.ts](../src/parser/media.ts)                 | `readMediaHeader` / `assignThreadPeers`（新規）                               |
+| [src/parser/sections.ts](../src/parser/sections.ts)           | `parseThread` でメディアヘッダを保持。全セクション読了後に post-pass で結合   |
+| [src/util/contactResolver.ts](../src/util/contactResolver.ts) | `normalizePeerId` を追加。表示名は CONTACTS → SETTINGS → 電話番号の順         |
+| [src/util/inboxIndex.ts](../src/util/inboxIndex.ts)           | `composeThreadList` を peer 単位マージに                                      |
 
 `peerPhone` は値がサービスアドレスも取るようになったため **`peerId` に
 リネーム**した（`InboxBucket` / `InboxMessage` / `Thread` / `ThreadSummary`）。
@@ -147,8 +147,8 @@ threads=44  peer解決済み=44  buckets=18  names=2
 
 同一プロセスで 3 回連続パースした比較：
 
-| | 実行時間 |
-|---|---|
+|        | 実行時間            |
+| ------ | ------------------- |
 | 修正前 | 1239 / 877 / 883 ms |
 | 修正後 | 1111 / 891 / 873 ms |
 

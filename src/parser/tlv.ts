@@ -44,9 +44,7 @@ export function* iterateTlvs(r: BinaryReader): Generator<TlvRecord> {
 }
 
 /** Iterate 0x000c key-value items inside a META/CONTACT-like container. */
-export function* iterateKeyValues(
-  r: BinaryReader,
-): Generator<TlvRecord> {
+export function* iterateKeyValues(r: BinaryReader): Generator<TlvRecord> {
   for (const rec of iterateTlvs(r)) {
     yield rec;
   }

@@ -106,7 +106,10 @@ describe('parseBackup — CONTACTS', () => {
       ascii('+819012345678'),
       new Uint8Array([RS]),
     );
-    const contacts = tlv(SECTION_CONTACTS, concat(u32le(1), contactItem('+819012345678', blob, tail)));
+    const contacts = tlv(
+      SECTION_CONTACTS,
+      concat(u32le(1), contactItem('+819012345678', blob, tail)),
+    );
     const bytes = buildMinimalBackup([contacts]);
     const backup = parseBackup(bytes);
 
@@ -130,7 +133,10 @@ describe('parseBackup — CONTACTS', () => {
       ascii('山田 太郎'),
       new Uint8Array([RS]),
     );
-    const contacts = tlv(SECTION_CONTACTS, concat(u32le(1), contactItem('+81900000000', blob, tail)));
+    const contacts = tlv(
+      SECTION_CONTACTS,
+      concat(u32le(1), contactItem('+81900000000', blob, tail)),
+    );
     const backup = parseBackup(buildMinimalBackup([contacts]));
     expect(backup.contacts[0]?.name).toBe('山田 太郎');
   });

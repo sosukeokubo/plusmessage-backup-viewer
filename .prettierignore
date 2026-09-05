@@ -1,0 +1,11 @@
+# Generated or vendored — reformatting these produces churn nobody reads and,
+# for the lockfile, a diff pnpm will simply undo.
+pnpm-lock.yaml
+node_modules
+dist
+coverage
+.vite
+
+# Verification artifacts holding real backup content. See CLAUDE.md.
+.playwright-cli
+.playwright-mcp

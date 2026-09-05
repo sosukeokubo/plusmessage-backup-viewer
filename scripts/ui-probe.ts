@@ -46,16 +46,15 @@ function main(): void {
   const virtualCount = composed.filter((t) => t.id.startsWith('inbox:')).length;
   const mergedCount = composed.length - virtualCount;
   const inboxBuckets = summary.inbox?.length ?? 0;
-  const totalInboxMessages = (summary.inbox ?? []).reduce(
-    (acc, b) => acc + b.messages.length,
-    0,
-  );
+  const totalInboxMessages = (summary.inbox ?? []).reduce((acc, b) => acc + b.messages.length, 0);
 
   console.log('## Pipeline counts');
   console.log(`  summary.threads:         ${realCount}`);
   console.log(`  summary.inbox buckets:   ${inboxBuckets}`);
   console.log(`  inbox messages total:    ${totalInboxMessages}`);
-  console.log(`  composed threads:        ${composed.length} (${mergedCount} from ${realCount} media records + ${virtualCount} inbox-only)`);
+  console.log(
+    `  composed threads:        ${composed.length} (${mergedCount} from ${realCount} media records + ${virtualCount} inbox-only)`,
+  );
   console.log(`  inboxIndex keys:         ${inboxIndex.size}`);
   console.log('');
 

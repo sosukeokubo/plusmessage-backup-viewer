@@ -69,11 +69,11 @@ contact blob の形は Contact セクションと同じ:
 
 `u32 × 5` のうち **index 0 が方向、index 3 が経路**。
 
-| index 0 | index 3 | MIME | 実ファイル件数 |
-|---|---|---|---|
-| 7 = 受信 | 5 = SMS | `text/plain;charset=utf-8` | 62 |
-| 7 = 受信 | 4 = +メッセージ | `text/plain` | 45 |
-| 6 = 送信 | 4 = +メッセージ | `text/plain` | 5 |
+| index 0  | index 3         | MIME                       | 実ファイル件数 |
+| -------- | --------------- | -------------------------- | -------------- |
+| 7 = 受信 | 5 = SMS         | `text/plain;charset=utf-8` | 62             |
+| 7 = 受信 | 4 = +メッセージ | `text/plain`               | 45             |
+| 6 = 送信 | 4 = +メッセージ | `text/plain`               | 5              |
 
 後段:
 
