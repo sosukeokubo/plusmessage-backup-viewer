@@ -1,0 +1,9 @@
+{
+  "name": "plusmessage-backup-viewer",
+  "compatibility_date": "2026-09-06",
+  "assets": {
+    // `_headers` は public/ に置き、vite build が dist/ 直下へコピーする。
+    // ここが dist/ を指していないと CSP がエラーなしで消える。
+    "directory": "./dist/",
+  },
+}

@@ -37,19 +37,29 @@ pnpm preview       # dist/ を本番同等で serve
 ## プライバシー
 
 - ログ、アナリティクス、エラー送信はすべて **Off**
-- CSP で外部通信を制限（`public/_headers` で指定、Cloudflare Pages 配信時に有効）
+- CSP で外部通信を制限（`public/_headers` で指定、Cloudflare Workers 配信時に有効）
 
-## デプロイ（Cloudflare Pages）
+## デプロイ（Cloudflare Workers）
 
-`public/_headers` が `dist/` にそのまま配置されるので、Cloudflare Pages にデプロイするだけで CSP / COOP / Referrer-Policy などのヘッダが有効になる。
+`wrangler.jsonc` が `dist/` を静的アセットとして配信する。`public/_headers` は
+`vite build` が `dist/` 直下へコピーし、Workers Static Assets がそれをそのまま
+解釈するので、デプロイするだけで CSP / COOP / Referrer-Policy が有効になる。
 
 ```bash
 pnpm build
 # ローカル確認
 pnpm preview
-# デプロイ（wrangler をインストール済みの場合）
-npx wrangler pages deploy dist/
+# デプロイ（初回は npx wrangler login が必要）
+npx wrangler deploy
 ```
+
+Worker スクリプトは書いていないので、`wrangler.jsonc` に `main` は無い。
+`dist/_headers` が欠けるとヘッダは**エラーを出さずに消える**ため、
+デプロイ後は下の `curl -I` で必ず確認する。
+
+Cloudflare Pages でも動くが（`npx wrangler pages deploy dist/`）、Cloudflare は
+新規プロジェクトを Workers に寄せており、`_headers` の扱いは両者で同じなので
+Workers を既定にしている。
 
 ### プライバシー検証
 
