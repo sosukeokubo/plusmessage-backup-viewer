@@ -69,7 +69,7 @@ git diff --cached | grep -nE "\+81[0-9]{9,}|[0-9a-f]{8}-[0-9a-f]{4}-" \
 pnpm dev          # http://localhost:5173
 pnpm test         # vitest
 pnpm typecheck
-pnpm exec eslint src test
+pnpm lint         # eslint .
 pnpm format:check # prettier。崩れていたら pnpm format
 pnpm tsx scripts/<name>.ts ./PlusMessage.backup   # 実ファイルでの検証
 ```
