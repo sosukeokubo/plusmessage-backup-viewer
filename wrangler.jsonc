@@ -1,6 +1,10 @@
 {
   "name": "plusmessage-backup-viewer",
   "compatibility_date": "2026-09-06",
+  "workers_dev": true,
+  // バージョンごとの公開プレビュー URL。段階的デプロイを使っていないので
+  // 生成する理由がなく、消える保証も無い（保持期限は文書化されていない）。
+  "preview_urls": false,
   "assets": {
     // `_headers` は public/ に置き、vite build が dist/ 直下へコピーする。
     // ここが dist/ を指していないと CSP がエラーなしで消える。
