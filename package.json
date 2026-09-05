@@ -1,6 +1,7 @@
 {
   "name": "plusmessage-backup-viewer",
   "version": "0.1.0",
+  "license": "0BSD",
   "private": true,
   "type": "module",
   "scripts": {
