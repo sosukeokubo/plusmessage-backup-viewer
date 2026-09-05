@@ -11,12 +11,22 @@
 ## 使い方（開発）
 
 ```bash
+git clone https://github.com/sosukeokubo/plusmessage-backup-viewer.git
+cd plusmessage-backup-viewer
 pnpm install
 pnpm dev           # http://localhost:5173
 pnpm test          # Vitest
 pnpm build         # dist/ へビルド
 pnpm preview       # dist/ を本番同等で serve
 ```
+
+**バックアップファイルは同梱していません。** 画面で会話を表示するには、自分の
+`PlusMessage.backup` が必要です。解析に使ったファイルは実在する個人のデータな
+ので、リポジトリには入れていません。
+
+`pnpm test` は実ファイルなしで通ります。テストは架空の値から組み立てたバイト列
+に対して走るためです。実ファイルを引数に取るのは `scripts/` 以下の検証
+スクリプトだけです。
 
 ## 構成
 
